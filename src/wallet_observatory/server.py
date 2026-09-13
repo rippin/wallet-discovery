@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, parse_qs
 from .chain import address
 from .analytics import paper_open,paper_close
 from .rules import cohort_stats,display_cohort
+from .discovery import coverage
 
 STATIC=Path(__file__).with_name('static')
 
@@ -31,7 +32,7 @@ def summary(store,config):
     signals=store.rows('''SELECT s.*,t.side,t.chain_time,(s.detected_at-t.chain_time) detection_age_seconds,t.venue,k.symbol,w.status wallet_status FROM signals s
       JOIN trades t ON t.id=s.trade_id JOIN tokens k ON k.mint=s.mint JOIN wallets w ON w.address=s.wallet
       ORDER BY s.id DESC LIMIT 100''')
-    tokens=store.rows('''SELECT t.*,s.price,s.liquidity,s.volume,s.observed_at,s.status market_status FROM tokens t
+    tokens=store.rows('''SELECT t.*,s.price,s.liquidity,s.volume,s.market_cap_usd,s.observed_at,s.status market_status FROM tokens t
        LEFT JOIN snapshots s ON s.id=(SELECT id FROM snapshots WHERE mint=t.mint ORDER BY observed_at DESC LIMIT 1)
        ORDER BY t.last_seen DESC LIMIT 150''')
     positions=store.rows('SELECT * FROM paper ORDER BY id DESC LIMIT 200')
@@ -41,6 +42,9 @@ def summary(store,config):
             'budgets':store.rows('SELECT bucket,SUM(credits) credits FROM budgets WHERE day LIKE ? GROUP BY bucket',(time.strftime('%Y-%m',time.gmtime())+'%',)),
             'collector':store.meta('collector'),'mode':store.meta('mode') or 'live',
             'live_enabled':config.live,'credit_limit':config.monthly_credits,
+            'discovery':coverage(store),'admission_pending':store.one('SELECT COUNT(DISTINCT wallet) n FROM admission_pending')['n'],
+            'min_market_cap_usd':config.min_market_cap,'discovery_interval':config.discovery_interval,
+            'rpc_route':store.meta('rpc_route'),'rpc_fallback_usage':store.meta('rpc_fallback_usage'),
             'as_of':time.time(),'model':'Each row names its detection-age cohort; cohorts are never pooled. Indicative estimates: $500, 15-minute delay from detection → 24-hour hold; 1% cost plus liquidity impact per side. Not executable quotes.'}
 
 def make_server(store,config):

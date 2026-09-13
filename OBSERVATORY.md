@@ -20,7 +20,7 @@ Open <http://127.0.0.1:8765>. Synthetic data is visibly labeled and stored in `d
 4. The container publishes **only** `127.0.0.1:8080`. For initial checks, use `ssh -L 8080:127.0.0.1:8080 user@VPS_IP` and open <http://127.0.0.1:8080> locally. Login username: `research`; password: your `OBS_PASSWORD`.
 5. Configure HTTPS below for access directly by IP from other devices. Do not change the published binding to `0.0.0.0` to work around TLS setup.
 
-Configuration: `OBS_RPC_URL` overrides the Helius-derived URL. `OBS_MONTHLY_CREDITS=900000` leaves headroom under the advertised 1M free credits. `OBS_RPC_CREDIT_COST=10` conservatively reserves ten credits for every RPC call, including failures. Confirm actual costs in your account before lowering it. Collection defaults to a five-minute cycle; browser refreshes do not make provider requests. Credentials are read from the environment and never returned through the dashboard API.
+Configuration: `OBS_RPC_URL` overrides the Helius-derived URL. `OBS_MONTHLY_CREDITS=900000` leaves headroom under the advertised 1M free credits. `OBS_RPC_CREDIT_COST=10` conservatively reserves ten credits for every RPC call, including failures. Confirm actual costs in your account before lowering it. Wallet/market evaluation defaults to a five-minute cycle; discovery has a separate 30-second tick; browser refreshes do not make provider requests. Credentials are read from the environment and never returned through the dashboard API.
 
 ## IP-based HTTPS, no domain required
 
@@ -38,7 +38,7 @@ Enable Certbot's automatic renewal timer and a deploy hook to reload nginx after
 
 ## What collection actually covers
 
-- Discovery polls the latest 50 finalized signatures for each launchpad program and chooses up to eight previously unseen signatures by a time-windowed hash, **before** knowing outcomes. It detects sampled launchpad **trades**, not every token creation. Active tokens are more likely to appear; this is not a uniform sample of all launches.
+- Discovery follows durable signature windows and processes a bounded oldest-first queue; see Cursor discovery and token admission below for budgets, bootstrap behavior, and coverage limits.
 - Both successful and unsuccessful token picks remain in the data. The transaction that first discovered a wallet is excluded from prospective rankings.
 - Selected wallets are read across supported Pump.fun, LaunchLab, PumpSwap, Raydium AMM/CPMM/CLMM and recognized Jupiter instructions. Each scan caps history at two 50-signature pages. A cap or unavailable transaction is recorded as a coverage event. Unsupported venues, unidentified token-to-token pairs outside explicitly decoded launchpad pairs or known tracked mints, multisigner complexities, and ambiguous multi-token movements are not asserted to be trades.
 - Only recognized swap instruction discriminators plus opposite asset/quote balance movements produce trade observations. Plain transfers and allocations are not classified as purchased tokens. Native SOL quantities remain approximate because rent and tips may share the transaction. There is **no claim of exact realized wallet P&L**.
@@ -119,3 +119,16 @@ Setup reads only `.env` in the repository root. Existing `.env.observatory` file
 Requires Bash, Git, Docker with the Compose v2 plugin (supporting `up --wait`), and permission to use Docker. It stops for local code changes, unexpected remotes/branches, divergent history, failed builds, or failed backups. It never runs `git reset --hard`, stashes your changes, installs Docker, or alters HTTPS/firewall configuration. Keep off-VPS copies of the generated backups; local backups share the server's failure risk. If the previous container is stopped, no automatic backup is taken: use the documented backup/restore procedure before updates requiring data migration.
 
 To reset the dashboard account, run `bash deploy/update.sh --reset-password`. This sets `research` to `password123` in `.env` and redeploys.
+
+
+## Cursor discovery and token admission
+
+Discovery now enumerates signature windows from the previous saved head instead of hash-sampling eight recent transactions. Solana returns signatures backwards: each window paginates to its previous cursor, then its durable queue is processed oldest first. The initial window bootstraps from one recent page, not the whole chain. Pagination and queued work survive restarts. Unavailable transactions are attempted three times and then counted as unavailable; provider failures keep the queue item pending.
+
+`OBS_DISCOVERY_SECONDS=30` spreads work between wallet/market cycles. `OBS_DISCOVERY_REQUESTS=6` caps primary RPC attempts per tick (two signature pages and up to four transaction reads). This is at most roughly 17,280 discovery requests/day before execution time and daily/monthly limits, versus approximately 5,184/day for the former sampler. Public fallback attempts have their own limits. Each page contains up to 1,000 signatures; each window has a 20-page safety ceiling. At most 20,000 unprocessed transactions are queued. Additional signatures are counted as skipped; history beyond a truncated window is an unknown gap, never reported as complete coverage. A large backlog increases detection age; the dashboard reports its oldest transaction. This is bounded coverage, not exhaustive indexing.
+
+Collection health shows signatures found, inspected transactions, pending work, known skips, failed on-chain signatures, unavailable transactions, ambiguous/unsupported parsing, and distinct buyers before filtering. Counters begin with this version, not historical hash samples.
+
+`OBS_MIN_MARKET_CAP_USD=10000` admits a new discovered wallet only after its token has a fresh DEX Screener market cap strictly above $10,000. Set it to `0` to disable admission filtering. FDV is not substituted. Unknown/below-threshold tokens and their buyers remain pending and are rechecked through market sampling. These observations do not become prospective historical wins when admitted later. Existing and manually watched wallets bypass admission filtering to preserve subsequent performance coverage. This saves follow-up wallet scans, not initial discovery transaction reads. Market cap is displayed in Token universe.
+
+LaunchLab routed swaps may spend a transient quote token with zero net wallet delta. The parser now reads checked quote transfers within the exact LaunchLab instruction subtree and verifies the explicit signer and base-token direction. Such trades are labeled instruction-local quote flows, not net wallet cost. Two real public-chain routed fixtures cover buys and sells; ambiguous attribution remains excluded.

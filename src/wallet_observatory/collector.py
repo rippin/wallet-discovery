@@ -1,4 +1,3 @@
-import hashlib
 import json
 import threading
 import time
@@ -7,12 +6,14 @@ from .chain import PUMP, LAB, parse
 from .providers import Providers, ProviderError, BudgetExceeded
 from .analytics import evaluate
 from .rules import classify,cohort_stats
+from .discovery import Discovery
 
 class Collector:
     def __init__(self,store,config,providers=None):
         self.store,self.config=store,config
         self.providers=providers or Providers(store,config)
         self.stop=threading.Event()
+        self.next_discovery=None
 
     def ingest(self,signature,tx,bucket,watch=None):
         if not tx or tx.get('blockTime') is None:
@@ -31,6 +32,14 @@ class Collector:
                     continue
                 previous=db.execute('SELECT first_seen FROM wallets WHERE address=?',(t['wallet'],)).fetchone()
                 known_at=previous['first_seen'] if previous else None
+                db.execute("INSERT OR IGNORE INTO tokens(mint,source,platform,first_seen,last_seen) VALUES(?,?,?,?,?)",
+                           (t['mint'],t['venue'],t['platform'],now,chain_time))
+                if discovery and previous is None and self.config.min_market_cap>0:
+                    valuation=db.execute('SELECT market_cap_usd,observed_at FROM snapshots WHERE mint=? ORDER BY observed_at DESC,id DESC LIMIT 1',(t['mint'],)).fetchone()
+                    if not valuation or valuation['observed_at']<now-600 or valuation['market_cap_usd'] is None or valuation['market_cap_usd']<=self.config.min_market_cap:
+                        db.execute('INSERT OR IGNORE INTO admission_pending VALUES(?,?,?,?)',(signature,t['wallet'],t['mint'],now))
+                        continue
+                db.execute('DELETE FROM admission_pending WHERE signature=? AND wallet=? AND mint=?',(signature,t['wallet'],t['mint']))
                 # Discovery is an activity sample, not a claim that this is the first buyer or launch.
                 db.execute('''INSERT INTO wallets(address,first_seen,last_seen,cursor) VALUES(?,?,?,?)
                     ON CONFLICT(address) DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen)''',
@@ -53,19 +62,17 @@ class Collector:
         return True
 
     def load_tx(self,sig,bucket):
+        if bucket!='discovery': self.discovery_due()
         cached=self.store.one('SELECT raw FROM transactions WHERE signature=?',(sig,))
         return json.loads(cached['raw']) if cached else self.providers.transaction(sig,bucket)
 
+    def discovery_due(self):
+        if self.next_discovery is not None and time.monotonic()>=self.next_discovery:
+            self.discover()
+            self.next_discovery=time.monotonic()+self.config.discovery_interval
+
     def discover(self):
-        for program in (PUMP,LAB):
-            page=self.providers.signatures(program,'discovery')
-            # Hash sample per time window, before fetching/parsing or knowing token outcomes.
-            window=int(time.time()//self.config.cycle_seconds)
-            unseen=[p for p in page if not p.get('err') and not self.store.one('SELECT 1 FROM transactions WHERE signature=?',(p['signature'],))]
-            sample=sorted(unseen,key=lambda p:hashlib.sha256(f'{window}:{p["signature"]}'.encode()).digest())[:self.config.discovery_sample]
-            self.store.meta('sample_'+program,{'at':time.time(),'page_size':len(page),'sampled':len(sample),'method':'hash sample of latest signatures; activity-weighted, not uniform launches'})
-            for item in sample:
-                self.ingest(item['signature'],self.load_tx(item['signature'],'discovery'),'discovery')
+        Discovery(self).tick()
 
     def scan_wallet(self,wallet,bucket):
         pending=[]; before=None; found=False; newest=None
@@ -105,12 +112,20 @@ class Collector:
         for offset in range(0,len(rows),30):
             for s in self.providers.market([r['mint'] for r in rows[offset:offset+30]]):
                 with self.store.connect() as db:
-                    db.execute('INSERT INTO snapshots(mint,observed_at,price,liquidity,volume,pair,status) VALUES(?,?,?,?,?,?,?)',
-                               (s['mint'],time.time(),s['price'],s['liquidity'],s['volume'],s['pair'],s['status']))
+                    db.execute('INSERT INTO snapshots(mint,observed_at,price,liquidity,volume,pair,status,market_cap_usd) VALUES(?,?,?,?,?,?,?,?)',
+                               (s['mint'],time.time(),s['price'],s['liquidity'],s['volume'],s['pair'],s['status'],s.get('market_cap_usd')))
                     if s['symbol']:
                         db.execute('UPDATE tokens SET symbol=? WHERE mint=?',(s['symbol'],s['mint']))
 
-    def cycle(self):
+        # Admit deferred buyers only once market cap is observed above the threshold.
+        # Detection/first-seen time is now, never backdated to the original trade.
+        pending=self.store.rows('''SELECT DISTINCT a.signature FROM admission_pending a LEFT JOIN snapshots s
+          ON s.id=(SELECT id FROM snapshots WHERE mint=a.mint ORDER BY observed_at DESC,id DESC LIMIT 1)
+          WHERE ?=0 OR (s.market_cap_usd>? AND s.observed_at>?) LIMIT 100''',(self.config.min_market_cap,self.config.min_market_cap,time.time()-600))
+        for item in pending:
+            self.ingest(item['signature'],self.load_tx(item['signature'],'discovery'),'discovery')
+
+    def cycle(self,include_discovery=True):
         self.store.meta('collector',{'status':'running','at':time.time()})
         for bucket in ('tracking','revisit'):
             statuses=('active','candidate') if bucket=='tracking' else ('cooldown','dormant')
@@ -123,7 +138,7 @@ class Collector:
                     self.store.event('quota',str(e)); break
                 except ProviderError as e:
                     self.store.event('provider',str(e)); break
-        for action in (self.discover,self.markets):
+        for action in ((self.discover,self.markets) if include_discovery else (self.markets,)):
             try:
                 action()
             except ProviderError as e:
@@ -132,10 +147,18 @@ class Collector:
         self.store.meta('collector',{'status':'waiting','at':time.time()})
 
     def run(self):
+        next_cycle=0
+        self.next_discovery=0
         while not self.stop.is_set():
+            now=time.monotonic()
             try:
-                self.cycle()
+                self.discovery_due()
+                if now>=next_cycle:
+                    self.cycle(include_discovery=False)
+                    next_cycle=time.monotonic()+self.config.cycle_seconds
             except Exception:
                 self.store.event('error','Collector cycle failed; retained data and cursors. Check application diagnostics/tests.')
                 self.store.meta('collector',{'status':'error','at':time.time()})
-            self.stop.wait(self.config.cycle_seconds)
+                self.next_discovery=time.monotonic()+self.config.discovery_interval
+                next_cycle=time.monotonic()+self.config.cycle_seconds
+            self.stop.wait(max(1,min(next_cycle,self.next_discovery)-time.monotonic()))

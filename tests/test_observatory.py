@@ -116,6 +116,7 @@ class Case(unittest.TestCase):
         tx['meta']['postTokenBalances'].append(extra)
         self.assertEqual(parse(tx)[2],'ambiguous_swap')
     def test_idempotent_ingest_and_no_discovery_hindsight(self):
+        self.cfg.min_market_cap=0
         c=Collector(self.store,self.cfg); tx=transaction()
         c.ingest('s1',tx,'discovery');c.ingest('s1',tx,'discovery')
         self.assertEqual(self.store.one('SELECT COUNT(*) n FROM trades')['n'],1)

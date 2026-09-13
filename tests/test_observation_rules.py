@@ -97,4 +97,4 @@ class ObservationRulesTests(unittest.TestCase):
         first=Store(old);second=Store(old)
         s=second.one('SELECT * FROM signals')
         self.assertEqual((s['eligible'],s['observation_class'],s['rule_version']),(0,'legacy',1))
-        self.assertEqual(second.meta('schema_version'),2)
+        self.assertEqual(second.meta('schema_version'),3)

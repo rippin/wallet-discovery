@@ -1,6 +1,7 @@
 import calendar
 from datetime import datetime, timezone
 import json
+import math
 import threading
 import time
 from urllib.request import Request, urlopen
@@ -110,8 +111,8 @@ class Providers:
             raise ProviderError('PublicNode request failed; paused for five minutes') from None
         return data.get('result')
 
-    def signatures(self,wallet,bucket,before=None):
-        args={'limit':self.config.page_limit,'commitment':'finalized'}
+    def signatures(self,wallet,bucket,before=None,limit=None):
+        args={'limit':limit or self.config.page_limit,'commitment':'finalized'}
         if before:
             args['before']=before
         return self.rpc('getSignaturesForAddress',[wallet,args],bucket) or []
@@ -130,9 +131,12 @@ class Providers:
             pairs=[p for p in data if p.get('chainId')=='solana' and (p.get('baseToken') or {}).get('address')==mint]
             pairs.sort(key=lambda p:float((p.get('liquidity') or {}).get('usd') or 0),reverse=True)
             p=pairs[0] if pairs else {}
+            market_cap=float(p['marketCap']) if p.get('marketCap') is not None else None
+            if market_cap is not None and (not math.isfinite(market_cap) or market_cap<0): market_cap=None
             result.append({'mint':mint,'price':float(p.get('priceUsd') or 0) or None,
                            'liquidity':float((p.get('liquidity') or {}).get('usd') or 0) or None,
                            'volume':float((p.get('volume') or {}).get('h24') or 0),
+                           'market_cap_usd':market_cap,
                            'pair':p.get('pairAddress'),'symbol':(p.get('baseToken') or {}).get('symbol','')[:40],
                            'status':'observed' if p.get('priceUsd') else 'unpriced'})
         return result

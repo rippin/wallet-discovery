@@ -5,6 +5,19 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = '''
+CREATE TABLE IF NOT EXISTS discovery_windows(id INTEGER PRIMARY KEY,program TEXT NOT NULL,started_at REAL NOT NULL,
+ completed_at REAL,head TEXT,before_signature TEXT,previous_cursor TEXT,state TEXT NOT NULL DEFAULT 'enumerating',
+ pages INTEGER NOT NULL DEFAULT 0,available INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0,
+ skipped INTEGER NOT NULL DEFAULT 0,inspected INTEGER NOT NULL DEFAULT 0,unavailable INTEGER NOT NULL DEFAULT 0,
+ ambiguous INTEGER NOT NULL DEFAULT 0,unsupported INTEGER NOT NULL DEFAULT 0,gap INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS discovery_queue(program TEXT NOT NULL,signature TEXT NOT NULL,window_id INTEGER NOT NULL,
+ chain_time REAL,sequence INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(program,signature));
+CREATE INDEX IF NOT EXISTS discovery_pending ON discovery_queue(status,window_id,sequence);
+CREATE TABLE IF NOT EXISTS discovery_buyers(window_id INTEGER NOT NULL,wallet TEXT NOT NULL,PRIMARY KEY(window_id,wallet));
+CREATE TABLE IF NOT EXISTS admission_pending(signature TEXT NOT NULL,wallet TEXT NOT NULL,mint TEXT NOT NULL,
+ observed_at REAL NOT NULL,PRIMARY KEY(signature,wallet,mint));
+
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wallets(address TEXT PRIMARY KEY,first_seen REAL NOT NULL,last_seen REAL NOT NULL,
  status TEXT NOT NULL DEFAULT 'candidate',next_scan REAL NOT NULL DEFAULT 0,last_scan REAL,
@@ -55,7 +68,10 @@ class Store:
                 db.execute("ALTER TABLE signals ADD COLUMN observation_class TEXT NOT NULL DEFAULT 'legacy'")
             if 'rule_version' not in columns:
                 db.execute('ALTER TABLE signals ADD COLUMN rule_version INTEGER NOT NULL DEFAULT 1')
-            db.execute("INSERT OR REPLACE INTO meta VALUES('schema_version','2')")
+            snap_columns={r['name'] for r in db.execute('PRAGMA table_info(snapshots)')}
+            if 'market_cap_usd' not in snap_columns:
+                db.execute('ALTER TABLE snapshots ADD COLUMN market_cap_usd REAL')
+            db.execute("INSERT OR REPLACE INTO meta VALUES('schema_version','3')")
 
     @contextmanager
     def connect(self):

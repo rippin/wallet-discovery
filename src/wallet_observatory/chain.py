@@ -37,6 +37,20 @@ ANCHOR_SWAPS = {hashlib.sha256(('global:'+n).encode()).digest()[:8] for n in (
  'route','shared_accounts_route','exact_out_route','shared_accounts_exact_out_route','route_with_token_ledger',
  'shared_accounts_route_with_token_ledger')}
 
+def launch_quote_flow(mapping,instructions):
+    account=mapping.get('user_quote_token');mint=mapping.get('quote_token_mint')
+    total=Decimal(0)
+    for ix in instructions:
+        if ix.get('programId')!=mapping.get('quote_token_program'): continue
+        parsed=ix.get('parsed') or {};info=parsed.get('info') or {}
+        if parsed.get('type')!='transferChecked' or info.get('mint')!=mint: continue
+        amount=info.get('tokenAmount') or {}
+        try: qty=Decimal(amount['amount'])/(10**int(amount['decimals']))
+        except (KeyError,ValueError,TypeError): continue
+        if info.get('source')==account and info.get('authority')==mapping.get('payer'): total-=qty
+        if info.get('destination')==account and info.get('source')==mapping.get('quote_vault'): total+=qty
+    return total
+
 def parse(tx, known_mints=()):
     if not tx or not tx.get('meta') or tx['meta'].get('err') is not None:
         return [], [], 'failed_or_missing'
@@ -44,8 +58,19 @@ def parse(tx, known_mints=()):
     keys = message['accountKeys']
     keys = [k if isinstance(k, dict) else {'pubkey': k, 'signer': False} for k in keys]
     instructions = list(message.get('instructions', []))
+    scopes={}
     for group in meta.get('innerInstructions') or []:
-        instructions.extend(group.get('instructions', []))
+        inner=group.get('instructions', [])
+        outer=message.get('instructions', [])
+        if group['index']<len(outer): scopes[id(outer[group['index']])]=inner
+        for pos,child in enumerate(inner):
+            height=child.get('stackHeight')
+            if height is None: continue
+            end=pos+1
+            while end<len(inner) and inner[end].get('stackHeight') is not None and inner[end]['stackHeight']>height:
+                end+=1
+            scopes[id(child)]=inner[pos+1:end]
+        instructions.extend(inner)
     recognized = []
     for ix in instructions:
         program = ix.get('programId')
@@ -77,7 +102,8 @@ def parse(tx, known_mints=()):
                            'base':mapping.get('base_token_mint') or mapping.get('base_mint') or mapping.get('mint'),
                            'quote':mapping.get('quote_token_mint') or mapping.get('quote_mint') or (WSOL if venue=='pumpfun' else None),
                            'user':mapping.get('user') or mapping.get('payer'),
-                           'side':('buy' if spec['name'].startswith('buy') else 'sell') if spec else None})
+                           'side':('buy' if spec['name'].startswith('buy') else 'sell') if spec else None,
+                           'quote_flow':launch_quote_flow(mapping,scopes.get(id(ix),[])) if venue=='launchlab' else None})
     links = []
     # Direct outer system transfers only: no pool flows or inferred ownership merges.
     for ix in message.get('instructions', []):
@@ -113,6 +139,12 @@ def parse(tx, known_mints=()):
             observation=explicit[0]
             assets=[(observation['base'],changes[observation['base']])]
             quote=[(observation['quote'],changes[observation['quote']])]
+            # Routed intermediary quote tokens may have zero net wallet movement.
+            # Only use checked transfers inside this exact LaunchLab instruction,
+            # with explicit user accounts and a matching net base-token direction.
+            if not quote[0][1] and len(explicit)==1 and observation.get('quote_flow'):
+                quote=[(observation['quote'],observation['quote_flow'])]
+                observation={**observation,'routed':True}
         else:
             # A decoded launchpad instruction for somebody else cannot explain this signer's balances.
             generic=[r for r in recognized if not r['base']]
@@ -140,5 +172,5 @@ def parse(tx, known_mints=()):
         trades.append({'wallet':wallet,'mint':mint,'side':'buy' if qty>0 else 'sell',
                        'quantity':float(abs(qty)), 'quote_mint':qm,'quote_quantity':float(abs(qq)),
                        'venue':venue,'platform':platform,
-                       'quality':'balance-delta estimate; native costs may include rent/tips' if qm==WSOL else 'balance-delta observation'})
+                       'quality':'instruction-local quote flow; routed cost is not net wallet cost' if observation.get('routed') else 'balance-delta estimate; native costs may include rent/tips' if qm==WSOL else 'balance-delta observation'})
     return trades, links, 'swap_observed' if trades else 'ambiguous_swap'

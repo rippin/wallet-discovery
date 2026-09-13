@@ -12,7 +12,12 @@ class Config:
     monthly_credits: int = 900_000
     rpc_credit_cost: int = 10  # conservative upper bound; adjustable for your provider
     cycle_seconds: int = 300
-    discovery_sample: int = 8
+    discovery_interval: int = 30
+    discovery_requests: int = 6
+    discovery_page_size: int = 1000
+    discovery_max_pages: int = 20
+    discovery_queue_cap: int = 20000
+    min_market_cap: float = 10000
     wallets_per_cycle: int = 8
     page_limit: int = 50
     max_pages: int = 2
@@ -28,4 +33,7 @@ class Config:
                    live=os.getenv('OBS_LIVE', '0') == '1',
                    monthly_credits=int(os.getenv('OBS_MONTHLY_CREDITS', '900000')),
                    rpc_credit_cost=int(os.getenv('OBS_RPC_CREDIT_COST', '10')),
-                   cycle_seconds=max(60, int(os.getenv('OBS_CYCLE_SECONDS', '300'))))
+                   cycle_seconds=max(60, int(os.getenv('OBS_CYCLE_SECONDS', '300'))),
+                   discovery_interval=max(10,int(os.getenv('OBS_DISCOVERY_SECONDS','30'))),
+                   discovery_requests=max(3,min(100,int(os.getenv('OBS_DISCOVERY_REQUESTS','6')))),
+                   min_market_cap=max(0,float(os.getenv('OBS_MIN_MARKET_CAP_USD','10000'))))

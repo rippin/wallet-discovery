@@ -1,4 +1,5 @@
 import argparse
+import math
 from dataclasses import replace
 import signal
 import threading
@@ -19,6 +20,8 @@ def main():
     if args.port: cfg.port=args.port
     if args.demo:
         cfg=replace(cfg,live=False,db=args.db or 'data/demo.sqlite3')
+    if not math.isfinite(cfg.min_market_cap):
+        parser.error('OBS_MIN_MARKET_CAP_USD must be finite')
     if cfg.monthly_credits<=0 or cfg.rpc_credit_cost<=0:
         parser.error('Credit settings must be positive')
     if cfg.host not in ('127.0.0.1','localhost','::1') and len(cfg.password)<7:
