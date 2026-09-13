@@ -101,3 +101,19 @@ Tests cover swap/transfer separation, launchpad instruction recognition, duplica
 - IP certificates: https://letsencrypt.org/2026/03/11/shorter-certs-certbot
 
 Instruction account layouts in `instructions.json` are selected from the official Pump and LaunchLab IDLs retrieved on 2026-09-12. Future unknown instructions fail closed until their definitions are reviewed.
+
+## One-command start/update
+
+After cloning the repository once on your VPS:
+
+```sh
+git clone --branch codex/wallet-observatory https://github.com/rippin/wallet-discovery.git
+cd wallet-discovery
+bash deploy/update.sh
+```
+
+Run `bash deploy/update.sh` again whenever you want the latest committed version. The script fetches and fast-forwards the branch, reloads its updated script, builds the image, validates configuration without printing secrets, backs up a running instance's database into `backups/`, starts Docker, and verifies the authenticated dashboard responds. It does not delete volumes or automatically roll back a failed deployment.
+
+On first interactive use, if `.env.observatory` does not exist, it prompts privately for a Helius key and a 20+ character dashboard password (letters/numbers/dash/underscore), creates the file with restrictive permissions, and enables live collection. Existing configuration is preserved; an existing file with `OBS_LIVE=0` requires you to change that setting explicitly. Later runs can be noninteractive.
+
+Requires Bash, Git, Docker with the Compose v2 plugin (supporting `up --wait`), and permission to use Docker. It stops for local code changes, unexpected remotes/branches, divergent history, failed builds, or failed backups. It never runs `git reset --hard`, stashes your changes, installs Docker, or alters HTTPS/firewall configuration. Keep off-VPS copies of the generated backups; local backups share the server's failure risk. If the previous container is stopped, no automatic backup is taken: use the documented backup/restore procedure before updates requiring data migration.
