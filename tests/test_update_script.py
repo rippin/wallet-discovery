@@ -51,3 +51,37 @@ else:
         r,c=self.run_script('build');self.assertNotEqual(r.returncode,0);self.assertNotIn('docker compose up',c)
     def test_backup_failure_blocks_replacement(self):
         r,c=self.run_script('backup');self.assertNotEqual(r.returncode,0);self.assertNotIn('docker compose up',c)
+
+class SetupPromptTests(unittest.TestCase):
+    def setup_env(self, credential):
+        script=(Path(__file__).parents[1]/'deploy/update.sh').read_text()
+        block=script[script.index('    local credential'):script.index('  chmod 600 .env.observatory')]
+        block=block.rsplit('  fi',1)[0]
+        with tempfile.TemporaryDirectory() as folder:
+            result=subprocess.run(['bash','-c','setup() {\n'+block+'\n}\nsetup'],
+                cwd=folder,input=credential+'\n'+'example-password-1234567890\n',capture_output=True,text=True)
+            path=Path(folder)/'.env.observatory'
+            return result,path.read_text() if path.exists() else ''
+    def test_chainstack_url_sets_budget_and_no_helius_key(self):
+        url='https://solana-mainnet.core.chainstack.com/example'
+        r,data=self.setup_env(url)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('OBS_RPC_URL='+url,data)
+        self.assertIn('HELIUS_API_KEY=\n',data)
+        self.assertIn('OBS_MONTHLY_CREDITS=2700000',data)
+        self.assertIn('OBS_RPC_CREDIT_COST=2',data)
+        self.assertNotIn(url,r.stdout+r.stderr)
+    def test_helius_key_still_supported(self):
+        r,data=self.setup_env('example-key')
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('HELIUS_API_KEY=example-key',data)
+        self.assertIn('OBS_RPC_URL=\n',data)
+    def test_url_query_preserved(self):
+        url='https://rpc.example.com/v1?api-key=example&mode=full'
+        r,data=self.setup_env(url)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('OBS_RPC_URL='+url,data)
+    def test_dotenv_interpolation_rejected(self):
+        r,data=self.setup_env('https://rpc.example.com/$SECRET')
+        self.assertNotEqual(r.returncode,0)
+        self.assertEqual(data,'')

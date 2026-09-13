@@ -41,19 +41,30 @@ main() {
 
   if [[ ! -f .env.observatory ]]; then
     if [[ ! -t 0 ]]; then
-      echo 'Missing .env.observatory. Run interactively once to enter the API key and password.' >&2
+      echo 'Missing .env.observatory. Run interactively once to enter an RPC URL or Helius API key and password.' >&2
       return 1
     fi
-    local api_key password
+    local credential api_key="" rpc_url="" password monthly=900000 cost=10
     echo 'First-time setup. Credentials are saved only in the ignored .env.observatory file.'
-    read -r -s -p 'Free Helius API key: ' api_key; printf '\n'
-    [[ "$api_key" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Expected a Helius API key, not a URL.' >&2; return 1; }
+    read -r -s -p 'HTTPS RPC URL (Chainstack, Alchemy, etc.) or Helius API key: ' credential; printf '\n'
+    if [[ "$credential" == https://* ]]; then
+      # Restrict dotenv metacharacters so credentials are saved literally.
+      [[ "$credential" =~ ^https://[a-zA-Z0-9.-]+(:[0-9]+)?(/[a-zA-Z0-9_./?=\&%+~-]*)?$ ]] || { echo 'Enter an HTTPS RPC URL without spaces, quotes, or dotenv variables.' >&2; return 1; }
+      rpc_url="$credential"
+      if [[ "$rpc_url" =~ ^https://([a-zA-Z0-9-]+\.)*chainstack\.com/ ]]; then
+        monthly=2700000; cost=2
+      fi
+    else
+      [[ "$credential" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Expected an HTTPS RPC URL or Helius API key.' >&2; return 1; }
+      api_key="$credential"
+    fi
+    printf 'Initial local budget: %s units/month, %s units/request. Adjust these in .env.observatory for your plan.\n' "$monthly" "$cost"
     read -r -s -p 'Dashboard password (20+ characters; letters, numbers, dash, underscore): ' password; printf '\n'
     [[ ${#password} -ge 20 && "$password" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Password must be 20+ characters using the requested character set.' >&2; return 1; }
     (umask 077
-      printf 'OBS_PASSWORD=%s\nHELIUS_API_KEY=%s\nOBS_RPC_URL=\nOBS_LIVE=1\nOBS_MONTHLY_CREDITS=900000\nOBS_RPC_CREDIT_COST=10\nOBS_CYCLE_SECONDS=300\n' "$password" "$api_key" > .env.observatory
+      printf 'OBS_PASSWORD=%s\nHELIUS_API_KEY=%s\nOBS_RPC_URL=%s\nOBS_LIVE=1\nOBS_MONTHLY_CREDITS=%s\nOBS_RPC_CREDIT_COST=%s\nOBS_CYCLE_SECONDS=300\n' "$password" "$api_key" "$rpc_url" "$monthly" "$cost" > .env.observatory
     )
-    unset password api_key
+    unset password api_key rpc_url credential
   fi
   chmod 600 .env.observatory
   # Do not source this file as shell code or print its resolved values.
