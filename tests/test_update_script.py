@@ -27,9 +27,9 @@ if name=='git':
 else:
  if args[:2]==['compose','build'] and fail=='build': sys.exit(1)
  if args[:2]==['compose','ps']: print('existing-container')
- if args[:2]==['compose','cp']:
+ if args[:2]==['compose','exec'] and any('shutil.copyfileobj' in a for a in args):
   if fail=='backup': sys.exit(1)
-  pathlib.Path(args[-1]).touch()
+  print('simulated backup bytes')
 '''
             for command in ('git','docker'):
                 p=root/'bin'/command;p.write_text(fake);p.chmod(0o755)
@@ -46,7 +46,7 @@ else:
     def test_success_pulls_backs_up_and_starts(self):
         r,c=self.run_script();self.assertEqual(r.returncode,0,r.stderr)
         self.assertEqual(c.count('git fetch'),1)
-        self.assertLess(c.index('docker compose cp'),c.index('docker compose up'))
+        self.assertLess(c.index('docker compose exec'),c.index('docker compose up'))
         self.assertIn('Updated successfully',r.stdout)
     def test_conventional_env_reused_without_prompt(self):
         r,c=self.run_script(conventional=True)

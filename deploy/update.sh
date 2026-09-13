@@ -104,8 +104,22 @@ path="/tmp/"+sys.argv[1]
 a=sqlite3.connect(source); b=sqlite3.connect(path)
 a.backup(b); b.close(); a.close()
 ' "$backup_name"
-    docker compose cp "observatory:/tmp/$backup_name" "backups/$backup_name"
-    chmod 600 "backups/$backup_name"
+    # Docker archive copying can fail for files on container tmpfs mounts.
+    # Read through the running container and expose only a complete backup.
+    (umask 077
+      docker compose exec -T observatory python -c '
+import sqlite3, sys
+path="/tmp/"+sys.argv[1]
+with sqlite3.connect("file:"+path+"?mode=ro",uri=True) as db:
+    if db.execute("PRAGMA quick_check").fetchone()[0]!="ok":
+        sys.exit("Backup integrity check failed")
+with open(path,"rb") as source:
+    import shutil
+    shutil.copyfileobj(source,sys.stdout.buffer)
+' "$backup_name" > "backups/$backup_name.partial"
+      [[ -s "backups/$backup_name.partial" ]]
+      mv "backups/$backup_name.partial" "backups/$backup_name"
+    )
     printf 'Backup saved: backups/%s\n' "$backup_name"
   fi
 
