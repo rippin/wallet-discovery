@@ -3,20 +3,21 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "solana-memecoin-research"
+name = "wallet-observatory"
 version = "0.1.0"
-description = "Point-in-time Solana memecoin risk research and wallet-forensics reports"
+description = "Solana wallet discovery, prospective research, and paper-trading dashboard"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Solana Memecoin Research contributors"}]
+authors = [{name = "Wallet Observatory contributors"}]
 dependencies = []
 
 [project.scripts]
-memecoin-research = "solana_memecoin_research.cli:main"
+wallet-observatory = "wallet_observatory.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["wallet_observatory*"]
 
 [tool.setuptools.package-data]
 wallet_observatory = ["instructions.json", "static/*.html", "static/*.css", "static/*.js"]

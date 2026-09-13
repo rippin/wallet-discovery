@@ -2,7 +2,7 @@
 
 A standalone, read-only Solana research application. It samples **Pump.fun and Raydium LaunchLab activity** to discover buyers, follows candidate wallets on supported trading venues, stores point-in-time observations, and provides manual paper entries and exits. No private keys, signing, order submission, paid streams, or automatic live trades.
 
-The existing `solana_memecoin_research` CLI remains independent. This application has no third-party Python runtime dependencies and requires Python 3.11+.
+This application has no third-party Python runtime dependencies and requires Python 3.11+.
 
 ## Local preview
 
