@@ -135,7 +135,7 @@ class Providers:
             if market_cap is not None and (not math.isfinite(market_cap) or market_cap<0): market_cap=None
             result.append({'mint':mint,'price':float(p.get('priceUsd') or 0) or None,
                            'liquidity':float((p.get('liquidity') or {}).get('usd') or 0) or None,
-                           'volume':float((p.get('volume') or {}).get('h24') or 0),
+                           'volume':float(p['volume']['h24']) if (p.get('volume') or {}).get('h24') is not None else None,
                            'market_cap_usd':market_cap,
                            'pair':p.get('pairAddress'),'symbol':(p.get('baseToken') or {}).get('symbol','')[:40],
                            'status':'observed' if p.get('priceUsd') else 'unpriced'})

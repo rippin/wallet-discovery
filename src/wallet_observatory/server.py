@@ -32,7 +32,7 @@ def summary(store,config):
     signals=store.rows('''SELECT s.*,t.side,t.chain_time,(s.detected_at-t.chain_time) detection_age_seconds,t.venue,k.symbol,w.status wallet_status FROM signals s
       JOIN trades t ON t.id=s.trade_id JOIN tokens k ON k.mint=s.mint JOIN wallets w ON w.address=s.wallet
       ORDER BY s.id DESC LIMIT 100''')
-    tokens=store.rows('''SELECT t.*,s.price,s.liquidity,s.volume,s.market_cap_usd,s.observed_at,s.status market_status FROM tokens t
+    tokens=store.rows('''SELECT t.*,s.price,s.liquidity,CASE WHEN s.pair IS NULL THEN NULL ELSE s.volume END volume,s.market_cap_usd,s.observed_at,s.status market_status FROM tokens t
        LEFT JOIN snapshots s ON s.id=(SELECT id FROM snapshots WHERE mint=t.mint ORDER BY observed_at DESC LIMIT 1)
        ORDER BY t.last_seen DESC LIMIT 150''')
     positions=store.rows('SELECT * FROM paper ORDER BY id DESC LIMIT 200')
