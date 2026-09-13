@@ -39,6 +39,12 @@ main() {
     exec bash "$repo_root/deploy/update.sh" --after-pull
   fi
 
+  # Support the conventional filename without sourcing credentials as shell code.
+  # The application-specific file takes precedence when both exist.
+  if [[ ! -f .env.observatory && -f .env ]]; then
+    (umask 077; cp .env .env.observatory)
+    echo 'Imported existing .env into .env.observatory. Future updates use .env.observatory; the original .env was preserved.'
+  fi
   if [[ ! -f .env.observatory ]]; then
     if [[ ! -t 0 ]]; then
       echo 'Missing .env.observatory. Run interactively once to enter an RPC URL or Helius API key and password.' >&2

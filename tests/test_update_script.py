@@ -7,11 +7,11 @@ import tempfile
 import unittest
 
 class UpdateScriptTests(unittest.TestCase):
-    def run_script(self, failure=''):
+    def run_script(self, failure='', conventional=False):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'deploy').mkdir();(root/'bin').mkdir()
             shutil.copyfile(Path(__file__).parents[1]/'deploy/update.sh',root/'deploy/update.sh')
-            (root/'.env.observatory').write_text('OBS_LIVE=1\n')
+            (root/('.env' if conventional else '.env.observatory')).write_text('OBS_LIVE=1\nOBS_RPC_URL=https://rpc.example.com/test\n')
             fake='''#!/usr/bin/env python3
 import os,sys,pathlib
 args=sys.argv[1:]; name=pathlib.Path(sys.argv[0]).name
@@ -37,12 +37,21 @@ else:
                  'TEST_LOG':str(root/'calls'),'TEST_ROOT':str(root),'TEST_FAIL':failure}
             result=subprocess.run(['bash',str(root/'deploy/update.sh')],env=env,capture_output=True,text=True)
             calls=(root/'calls').read_text()
+            if conventional:
+                self.assertEqual((root/'.env.observatory').read_text(),(root/'.env').read_text())
+                self.assertEqual((root/'.env.observatory').stat().st_mode & 0o777,0o600)
             return result,calls
     def test_success_pulls_backs_up_and_starts(self):
         r,c=self.run_script();self.assertEqual(r.returncode,0,r.stderr)
         self.assertEqual(c.count('git fetch'),1)
         self.assertLess(c.index('docker compose cp'),c.index('docker compose up'))
         self.assertIn('Updated successfully',r.stdout)
+    def test_conventional_env_reused_without_prompt(self):
+        r,c=self.run_script(conventional=True)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('Imported existing .env',r.stdout)
+        self.assertNotIn('First-time setup',r.stdout)
+
     def test_local_changes_stop_before_fetch(self):
         r,c=self.run_script('dirty');self.assertNotEqual(r.returncode,0);self.assertNotIn('git fetch',c)
     def test_divergence_stops_before_build(self):
