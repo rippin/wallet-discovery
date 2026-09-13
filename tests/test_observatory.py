@@ -49,7 +49,7 @@ def transaction(program=PUMP,side='buy',stamp=None):
 
 class Case(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.store=Store(Path(self.tmp.name)/'test.db');self.cfg=Config(db=self.store.path)
+        self.tmp=tempfile.TemporaryDirectory();self.store=Store(Path(self.tmp.name)/'test.db');self.cfg=Config(min_purchase_usd=0,db=self.store.path)
     def tearDown(self):self.tmp.cleanup()
     def snap(self,mint,at,price=1,liquidity=1e6,status='observed'):
         self.store.execute('INSERT INTO snapshots(mint,observed_at,price,liquidity,status) VALUES(?,?,?,?,?)',(mint,at,price,liquidity,status))
@@ -158,7 +158,7 @@ class Case(unittest.TestCase):
         mint=key(30);self.snap(mint,time.time()-20);self.snap(mint,time.time(),None,None,'unpriced')
         with self.assertRaises(ValueError):paper_open(self.store,mint,500)
     def test_budget_hard_limit_persists(self):
-        cfg=Config(monthly_credits=1000);p=Providers(self.store,cfg)
+        cfg=Config(min_purchase_usd=0,monthly_credits=1000);p=Providers(self.store,cfg)
         p.reserve('tracking',10)
         with self.assertRaises(BudgetExceeded):Providers(Store(self.store.path),cfg).reserve('tracking',1000)
         self.assertEqual(self.store.one('SELECT SUM(credits) n FROM budgets')['n'],10)
@@ -169,7 +169,7 @@ class Case(unittest.TestCase):
         self.store.execute('UPDATE wallets SET last_seen=?',(now,));evaluate(self.store)
         self.assertEqual(self.store.one('SELECT status FROM wallets')['status'],'candidate')
     def test_http_auth_csrf_and_static(self):
-        cfg=Config(password='a-very-long-test-password',port=0)
+        cfg=Config(min_purchase_usd=0,password='a-very-long-test-password',port=0)
         server=make_server(self.store,cfg);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         root=f'http://127.0.0.1:{server.server_port}'
         auth={'Authorization':'Basic '+base64.b64encode(('research:'+cfg.password).encode()).decode()}

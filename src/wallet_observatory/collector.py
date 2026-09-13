@@ -1,4 +1,5 @@
 import json
+import math
 import threading
 import time
 
@@ -34,6 +35,22 @@ class Collector:
                 known_at=previous['first_seen'] if previous else None
                 db.execute("INSERT OR IGNORE INTO tokens(mint,source,platform,first_seen,last_seen) VALUES(?,?,?,?,?)",
                            (t['mint'],t['venue'],t['platform'],now,chain_time))
+                if discovery and previous is None and self.config.min_purchase_usd>0:
+                    db.execute('INSERT OR IGNORE INTO admission_values(signature,wallet,mint,quote_mint,quote_quantity) VALUES(?,?,?,?,?)',
+                               (signature,t['wallet'],t['mint'],t['quote_mint'],t['quote_quantity']))
+                    value=db.execute('SELECT estimated_usd FROM admission_values WHERE signature=? AND wallet=? AND mint=?',
+                                     (signature,t['wallet'],t['mint'])).fetchone()['estimated_usd']
+                    if value is None:
+                        rate=db.execute('SELECT price,observed_at FROM quote_prices WHERE mint=?',(t['quote_mint'],)).fetchone()
+                        if rate and rate['observed_at']>=now-600 and rate['price'] is not None and math.isfinite(rate['price']) and rate['price']>0:
+                            estimate=t['quote_quantity']*rate['price']
+                            if math.isfinite(estimate) and estimate>=0:
+                                value=estimate
+                                db.execute('UPDATE admission_values SET estimated_usd=?,valued_at=? WHERE signature=? AND wallet=? AND mint=?',
+                                           (value,now,signature,t['wallet'],t['mint']))
+                    if value is None or value<self.config.min_purchase_usd:
+                        db.execute('INSERT OR IGNORE INTO admission_pending VALUES(?,?,?,?)',(signature,t['wallet'],t['mint'],now))
+                        continue
                 if discovery and previous is None and self.config.min_market_cap>0:
                     valuation=db.execute('SELECT market_cap_usd,observed_at FROM snapshots WHERE mint=? ORDER BY observed_at DESC,id DESC LIMIT 1',(t['mint'],)).fetchone()
                     if not valuation or valuation['observed_at']<now-600 or valuation['market_cap_usd'] is None or valuation['market_cap_usd']<=self.config.min_market_cap:
@@ -103,6 +120,13 @@ class Collector:
                            (newest,now,now+interval,wallet['address']))
 
     def markets(self):
+        # Price quote currencies in a separate cache, not the tracked token universe.
+        quotes=self.store.rows('''SELECT a.quote_mint FROM admission_values a LEFT JOIN quote_prices q ON q.mint=a.quote_mint
+          WHERE a.estimated_usd IS NULL AND a.quote_mint IS NOT NULL
+          GROUP BY a.quote_mint ORDER BY COALESCE(MAX(q.observed_at),0) LIMIT 30''')
+        if quotes:
+            for quote in self.providers.market([r['quote_mint'] for r in quotes]):
+                self.store.execute('INSERT OR REPLACE INTO quote_prices VALUES(?,?,?)',(quote['mint'],quote['price'],time.time()))
         # Open positions first, then tokens with pending 28-day outcomes; oldest sample first.
         rows=self.store.rows('''SELECT t.mint,MAX(s.observed_at) last_sample,
           EXISTS(SELECT 1 FROM paper p WHERE p.mint=t.mint AND p.remaining>0) held
@@ -119,11 +143,17 @@ class Collector:
 
         # Admit deferred buyers only once market cap is observed above the threshold.
         # Detection/first-seen time is now, never backdated to the original trade.
-        pending=self.store.rows('''SELECT DISTINCT a.signature FROM admission_pending a LEFT JOIN snapshots s
-          ON s.id=(SELECT id FROM snapshots WHERE mint=a.mint ORDER BY observed_at DESC,id DESC LIMIT 1)
-          WHERE ?=0 OR (s.market_cap_usd>? AND s.observed_at>?) LIMIT 100''',(self.config.min_market_cap,self.config.min_market_cap,time.time()-600))
+        query='''SELECT DISTINCT a.signature FROM admission_pending a
+          LEFT JOIN admission_values v ON v.signature=a.signature AND v.wallet=a.wallet AND v.mint=a.mint
+          WHERE (?=0 OR v.estimated_usd IS NULL OR v.estimated_usd>=?) AND a.signature>?
+          ORDER BY a.signature LIMIT 100'''
+        cursor=self.store.meta('admission_recheck_cursor') or ''
+        pending=self.store.rows(query,(self.config.min_purchase_usd,self.config.min_purchase_usd,cursor))
+        if not pending and cursor:
+            pending=self.store.rows(query,(self.config.min_purchase_usd,self.config.min_purchase_usd,''))
         for item in pending:
             self.ingest(item['signature'],self.load_tx(item['signature'],'discovery'),'discovery')
+            self.store.meta('admission_recheck_cursor',item['signature'])
 
     def cycle(self,include_discovery=True):
         self.store.meta('collector',{'status':'running','at':time.time()})

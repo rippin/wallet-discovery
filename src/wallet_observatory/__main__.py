@@ -20,6 +20,8 @@ def main():
     if args.port: cfg.port=args.port
     if args.demo:
         cfg=replace(cfg,live=False,db=args.db or 'data/demo.sqlite3')
+    if not math.isfinite(cfg.min_purchase_usd):
+        parser.error('OBS_MIN_PURCHASE_USD must be finite')
     if not math.isfinite(cfg.min_market_cap):
         parser.error('OBS_MIN_MARKET_CAP_USD must be finite')
     if cfg.monthly_credits<=0 or cfg.rpc_credit_cost<=0:

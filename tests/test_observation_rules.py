@@ -33,7 +33,7 @@ class ObservationRulesTests(unittest.TestCase):
         self.assertEqual(classify(self.now-10,self.now+1,self.now),('future',False))
     def test_thirty_minute_lag_is_eligible_and_measured_from_detection(self):
         with patch('wallet_observatory.collector.time.time',return_value=self.now):
-            Collector(self.store,Config()).ingest('slow',transaction(stamp=self.now-1800),'tracking',self.wallet)
+            Collector(self.store,Config(min_purchase_usd=0,)).ingest('slow',transaction(stamp=self.now-1800),'tracking',self.wallet)
         s=self.store.one('SELECT * FROM signals')
         self.assertEqual((s['eligible'],s['observation_class'],s['rule_version']),(1,'delayed',2))
         self.assertEqual(s['detected_at'],self.now)
@@ -44,7 +44,7 @@ class ObservationRulesTests(unittest.TestCase):
         self.assertEqual(o['entry_price'],1)
     def test_rediscovery_of_known_wallet_can_qualify(self):
         with patch('wallet_observatory.collector.time.time',return_value=self.now):
-            c=Collector(self.store,Config());tx=transaction(stamp=self.now-1800)
+            c=Collector(self.store,Config(min_purchase_usd=0,));tx=transaction(stamp=self.now-1800)
             c.ingest('known-discovery',tx,'discovery');c.ingest('known-discovery',tx,'tracking',self.wallet)
         self.assertEqual(self.store.one('SELECT COUNT(*) n FROM signals')['n'],1)
         self.assertEqual(self.store.one('SELECT observation_class FROM signals')['observation_class'],'delayed')
@@ -81,7 +81,7 @@ class ObservationRulesTests(unittest.TestCase):
             def signatures(self,*args):return []
         wallet=self.store.one('SELECT * FROM wallets')
         with patch('wallet_observatory.collector.time.time',return_value=self.now):
-            Collector(self.store,Config(),EmptyProvider()).scan_wallet(wallet,'tracking')
+            Collector(self.store,Config(min_purchase_usd=0,),EmptyProvider()).scan_wallet(wallet,'tracking')
         self.assertEqual(self.store.one('SELECT next_scan FROM wallets')['next_scan'],self.now+900)
     def test_legacy_winners_do_not_promote_under_new_rules(self):
         for i in range(8):self.signal(key(i+30),self.now-2*86400-i,'legacy')

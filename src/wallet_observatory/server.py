@@ -42,7 +42,9 @@ def summary(store,config):
             'budgets':store.rows('SELECT bucket,SUM(credits) credits FROM budgets WHERE day LIKE ? GROUP BY bucket',(time.strftime('%Y-%m',time.gmtime())+'%',)),
             'collector':store.meta('collector'),'mode':store.meta('mode') or 'live',
             'live_enabled':config.live,'credit_limit':config.monthly_credits,
-            'discovery':coverage(store),'admission_pending':store.one('SELECT COUNT(DISTINCT wallet) n FROM admission_pending')['n'],
+            'discovery':coverage(store),'admission_pending':store.one('SELECT COUNT(DISTINCT wallet) n FROM admission_pending a WHERE NOT EXISTS(SELECT 1 FROM wallets w WHERE w.address=a.wallet)')['n'],
+            'min_purchase_usd':config.min_purchase_usd,
+            'purchase_filter':store.one('SELECT SUM(estimated_usd IS NULL) unknown,SUM(estimated_usd<?) below FROM admission_values',(config.min_purchase_usd,)),
             'min_market_cap_usd':config.min_market_cap,'discovery_interval':config.discovery_interval,
             'rpc_route':store.meta('rpc_route'),'rpc_fallback_usage':store.meta('rpc_fallback_usage'),
             'as_of':time.time(),'model':'Each row names its detection-age cohort; cohorts are never pooled. Indicative estimates: $500, 15-minute delay from detection → 24-hour hold; 1% cost plus liquidity impact per side. Not executable quotes.'}

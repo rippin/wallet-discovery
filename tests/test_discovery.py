@@ -26,7 +26,7 @@ def sig(name,failed=False):return {'signature':name,'blockTime':time.time(),'err
 class DiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.s=Store(self.tmp.name+'/db');self.cfg=Config(min_market_cap=0,discovery_page_size=2)
+        self.s=Store(self.tmp.name+'/db');self.cfg=Config(min_purchase_usd=0,min_market_cap=0,discovery_page_size=2)
         self.f=Fake();self.c=Collector(self.s,self.cfg,self.f);self.d=Discovery(self.c)
     def seed(self):
         self.f.pages[(PUMP,None)]=[sig('old')];self.d.enumerate_page(PUMP)

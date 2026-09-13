@@ -5,6 +5,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = '''
+CREATE TABLE IF NOT EXISTS quote_prices(mint TEXT PRIMARY KEY,price REAL,observed_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS admission_values(signature TEXT NOT NULL,wallet TEXT NOT NULL,mint TEXT NOT NULL,
+ quote_mint TEXT,quote_quantity REAL,estimated_usd REAL,valued_at REAL,
+ PRIMARY KEY(signature,wallet,mint));
+
 CREATE TABLE IF NOT EXISTS discovery_windows(id INTEGER PRIMARY KEY,program TEXT NOT NULL,started_at REAL NOT NULL,
  completed_at REAL,head TEXT,before_signature TEXT,previous_cursor TEXT,state TEXT NOT NULL DEFAULT 'enumerating',
  pages INTEGER NOT NULL DEFAULT 0,available INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0,
