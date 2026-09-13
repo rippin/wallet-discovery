@@ -23,6 +23,14 @@ def summary(store,config):
           FROM outcomes o JOIN signals s ON s.id=o.signal_id WHERE s.wallet=? AND o.delay=900 AND o.horizon=86400
           AND s.detected_at>? AND s.id=(SELECT MIN(id) FROM signals WHERE wallet=s.wallet AND mint=s.mint AND eligible=1)''',(w['address'],time.time()-30*86400))
         w.update(stats)
+        speed=store.one('''SELECT COUNT(*) buys,
+          SUM(EXISTS(SELECT 1 FROM trades sell WHERE sell.wallet=b.wallet AND sell.mint=b.mint
+            AND sell.side='sell' AND sell.chain_time>b.chain_time AND sell.chain_time<=b.chain_time+900)) quick_exits
+          FROM trades b WHERE b.wallet=? AND b.side='buy' AND b.chain_time>? AND b.chain_time<?''',
+          (w['address'],time.time()-30*86400,time.time()-900))
+        w['quick_exit_observations']=speed['quick_exits'] or 0
+        w['mature_buy_observations']=speed['buys']
+
     signals=store.rows('''SELECT s.*,t.side,t.chain_time,t.venue,k.symbol,w.status wallet_status FROM signals s
       JOIN trades t ON t.id=s.trade_id JOIN tokens k ON k.mint=s.mint JOIN wallets w ON w.address=s.wallet
       ORDER BY s.id DESC LIMIT 100''')
@@ -41,6 +49,10 @@ def summary(store,config):
 def make_server(store,config):
     class Handler(BaseHTTPRequestHandler):
         server_version='WalletObservatory'
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(20)
+
         def log_message(self,*args):
             pass  # No auth headers, API keys, or query strings in logs.
 

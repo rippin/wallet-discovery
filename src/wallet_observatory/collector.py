@@ -18,7 +18,7 @@ class Collector:
             self.store.event('coverage','Transaction unavailable; historical coverage incomplete')
             return False
         now=time.time(); chain_time=tx['blockTime']
-        trades,links,status=parse(tx)
+        trades,links,status=parse(tx, {r['mint'] for r in self.store.rows('SELECT mint FROM tokens')})
         with self.store.connect() as db:
             db.execute('INSERT OR IGNORE INTO transactions VALUES(?,?,?,?,?)',
                        (signature,chain_time,now,json.dumps(tx,separators=(',',':')),status))

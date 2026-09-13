@@ -37,7 +37,7 @@ ANCHOR_SWAPS = {hashlib.sha256(('global:'+n).encode()).digest()[:8] for n in (
  'route','shared_accounts_route','exact_out_route','shared_accounts_exact_out_route','route_with_token_ledger',
  'shared_accounts_route_with_token_ledger')}
 
-def parse(tx):
+def parse(tx, known_mints=()):
     if not tx or not tx.get('meta') or tx['meta'].get('err') is not None:
         return [], [], 'failed_or_missing'
     meta = tx['meta']; message = tx['transaction']['message']
@@ -59,17 +59,25 @@ def parse(tx):
             continue
         venue = PROGRAMS[program]
         platform = None
+        mapping = {}
+        spec = None
         if venue in IDL:
             spec = IDL[venue].get(data[:8].hex())
             if not spec:
                 continue
             accounts = ix.get('accounts', [])
             accounts = [keys[a]['pubkey'] if isinstance(a,int) else a for a in accounts]
+            if len(accounts) < len(spec['accounts']):
+                continue
             mapping = dict(zip(spec['accounts'], accounts))
             platform = mapping.get('platform_config')
         elif not (data[:8] in ANCHOR_SWAPS or (venue == 'raydium-amm' and data[:1] in (b'\x09', b'\x0b'))):
             continue
-        recognized.append((venue, platform))
+        recognized.append({'venue':venue,'platform':platform,
+                           'base':mapping.get('base_token_mint') or mapping.get('base_mint') or mapping.get('mint'),
+                           'quote':mapping.get('quote_token_mint') or mapping.get('quote_mint') or (WSOL if venue=='pumpfun' else None),
+                           'user':mapping.get('user') or mapping.get('payer'),
+                           'side':('buy' if spec['name'].startswith('buy') else 'sell') if spec else None})
     links = []
     # Direct outer system transfers only: no pool flows or inferred ownership merges.
     for ix in message.get('instructions', []):
@@ -97,8 +105,28 @@ def parse(tx):
         if index == 0:
             native += Decimal(meta.get('fee',0))/10**9
         changes[WSOL] += native
-        assets = [(m,q) for m,q in changes.items() if m not in QUOTES and abs(q)>Decimal('0.000000000001')]
-        quote = [(m,q) for m,q in changes.items() if m in QUOTES and abs(q)>Decimal('0.000001')]
+        explicit=[r for r in recognized if r['base'] and r['user']==wallet]
+        if explicit:
+            identities={(r['base'],r['quote'],r['side']) for r in explicit}
+            if len(identities)!=1:
+                continue
+            observation=explicit[0]
+            assets=[(observation['base'],changes[observation['base']])]
+            quote=[(observation['quote'],changes[observation['quote']])]
+        else:
+            # A decoded launchpad instruction for somebody else cannot explain this signer's balances.
+            generic=[r for r in recognized if not r['base']]
+            if not generic:
+                continue
+            observation=generic[0]
+            changed={m:q for m,q in changes.items() if abs(q)>Decimal('0.000001')}
+            tracked=[m for m in changed if m in known_mints and m not in QUOTES]
+            if len(tracked)==1:
+                assets=[(tracked[0],changed[tracked[0]])]
+                quote=[(m,q) for m,q in changed.items() if m!=tracked[0]]
+            else:
+                assets=[(m,q) for m,q in changed.items() if m not in QUOTES]
+                quote=[(m,q) for m,q in changed.items() if m in QUOTES]
         if len(assets) != 1:
             continue
         mint, qty = assets[0]
@@ -106,7 +134,9 @@ def parse(tx):
         if len(opposite) != 1:
             continue
         qm, qq = opposite[0]
-        venue,platform = next((v for v in recognized if v[0] in IDL), recognized[0])
+        venue,platform=observation['venue'],observation['platform']
+        if observation['side'] and observation['side']!=('buy' if qty>0 else 'sell'):
+            continue
         trades.append({'wallet':wallet,'mint':mint,'side':'buy' if qty>0 else 'sell',
                        'quantity':float(abs(qty)), 'quote_mint':qm,'quote_quantity':float(abs(qq)),
                        'venue':venue,'platform':platform,

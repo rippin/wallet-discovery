@@ -31,10 +31,18 @@ def transaction(program=PUMP,side='buy',stamp=None):
     name=side if program==PUMP else side+'_exact_in'
     venue='pumpfun' if program==PUMP else 'launchlab'
     discriminator=next(d for d,s in IDL[venue].items() if s['name']==name)
+    accounts=[]
+    for account in IDL[venue][discriminator]['accounts']:
+        accounts.append(wallet if account in ('user','payer') else mint if account in ('mint','base_mint','base_token_mint') else USDC if account in ('quote_mint','quote_token_mint') else key(20))
+    if program==PUMP:
+        # Use v2 explicit-quote instructions for this stablecoin fixture.
+        name=side+'_v2'
+        discriminator=next(d for d,s in IDL[venue].items() if s['name']==name)
+        accounts=[wallet if a=='user' else mint if a=='base_mint' else USDC if a=='quote_mint' else key(20) for a in IDL[venue][discriminator]['accounts']]
     def bal(mint,amount):return {'owner':wallet,'mint':mint,'uiTokenAmount':{'amount':str(amount),'decimals':6},'accountIndex':1 if mint!=USDC else 2}
     return {'blockTime':stamp or time.time(),'transaction':{'message':{'accountKeys':[{'pubkey':wallet,'signer':True}],
           'instructions':[{'programId':program,'data':encode(bytes.fromhex(discriminator)+bytes(16)),
-                           'accounts':[key(i+1) for i in range(20)]}]}},
+                           'accounts':accounts}]}},
           'meta':{'err':None,'fee':5000,'preBalances':[1000000000],'postBalances':[999995000],
                   'preTokenBalances':[bal(mint,0 if side=='buy' else 10000000),bal(USDC,1000000000 if side=='buy' else 0)],
                   'postTokenBalances':[bal(mint,10000000 if side=='buy' else 0),bal(USDC,0 if side=='buy' else 1000000000)]}}
@@ -50,6 +58,32 @@ class Case(unittest.TestCase):
         self.store.execute('INSERT OR IGNORE INTO wallets(address,first_seen,last_seen) VALUES(?,?,?)',(w,at-10,at))
         sid=self.store.execute('INSERT INTO signals(trade_id,wallet,mint,detected_at,eligible) VALUES(?,?,?,?,1)',(int(at),w,mint,at))
         return sid,mint
+    def test_real_finalized_launchlab_fixtures(self):
+        for name in ('launchlab_arbitrary_quote','launchlab_sol_quote'):
+            tx=json.loads((Path(__file__).parent/'fixtures'/'observatory'/(name+'.json')).read_text())
+            trades,_,status=parse(tx)
+            self.assertEqual(status,'swap_observed')
+            self.assertEqual(trades[0]['venue'],'launchlab')
+            self.assertEqual(trades[0]['side'],'buy')
+            self.assertGreater(trades[0]['quantity'],0)
+
+    def test_scan_retry_retains_cursor_and_deduplicates(self):
+        now=time.time();w=key(1)
+        self.store.execute('INSERT INTO wallets(address,first_seen,last_seen,cursor) VALUES(?,?,?,?)',(w,now-60,now,'old'))
+        tx=transaction(stamp=now)
+        class Fake:
+            fail=True
+            def signatures(self,*args):return [{'signature':'new','err':None},{'signature':'old','err':None}]
+            def transaction(inner,*args):return None if inner.fail else tx
+        fake=Fake();c=Collector(self.store,self.cfg,fake)
+        wallet=self.store.one('SELECT * FROM wallets')
+        c.scan_wallet(wallet,'tracking')
+        self.assertEqual(self.store.one('SELECT cursor FROM wallets')['cursor'],'old')
+        fake.fail=False;c.scan_wallet(wallet,'tracking')
+        self.assertEqual(self.store.one('SELECT cursor FROM wallets')['cursor'],'new')
+        c.scan_wallet(wallet,'tracking')
+        self.assertEqual(self.store.one('SELECT COUNT(*) n FROM trades')['n'],1)
+
     def test_decode_pump_and_lab(self):
         for program in (PUMP,LAB):
             for side in ('buy','sell'):
@@ -57,6 +91,18 @@ class Case(unittest.TestCase):
                 self.assertEqual(state,'swap_observed');self.assertEqual(trades[0]['side'],side)
                 self.assertEqual(trades[0]['quote_quantity'],1000)
                 if program==LAB:self.assertIsNotNone(trades[0]['platform'])
+    def test_launchlab_arbitrary_quote_and_user_attribution(self):
+        tx=transaction(LAB);quote=key(42)
+        ix=tx['transaction']['message']['instructions'][0]
+        ix['accounts'][10]=quote
+        for side in ('preTokenBalances','postTokenBalances'):
+            tx['meta'][side][1]['mint']=quote
+        trades,_,_=parse(tx)
+        self.assertEqual(trades[0]['quote_mint'],quote)
+        self.assertEqual(trades[0]['mint'],key(30))
+        ix['accounts'][0]=key(2)
+        self.assertFalse(parse(tx)[0])
+
     def test_failed_and_plain_transfer_not_trades(self):
         tx=transaction();tx['meta']['err']={'InstructionError':[0,'failed']}
         self.assertEqual(parse(tx)[0],[])
@@ -66,7 +112,7 @@ class Case(unittest.TestCase):
         tx=transaction();tx['transaction']['message']['instructions'][0]['data']=encode(bytes(24))
         self.assertFalse(parse(tx)[0])
     def test_complex_multi_token_is_ambiguous(self):
-        tx=transaction();extra=dict(tx['meta']['postTokenBalances'][0]);extra['mint']=key(31)
+        tx=transaction();tx['transaction']['message']['instructions']=[{'programId':'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C','data':encode(hashlib.sha256(b'global:swap_base_input').digest()[:8]),'accounts':[]}];extra=dict(tx['meta']['postTokenBalances'][0]);extra['mint']=key(31)
         tx['meta']['postTokenBalances'].append(extra)
         self.assertEqual(parse(tx)[2],'ambiguous_swap')
     def test_idempotent_ingest_and_no_discovery_hindsight(self):
