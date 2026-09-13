@@ -6,6 +6,7 @@ import time
 from .chain import PUMP, LAB, parse
 from .providers import Providers, ProviderError, BudgetExceeded
 from .analytics import evaluate
+from .rules import classify,cohort_stats
 
 class Collector:
     def __init__(self,store,config,providers=None):
@@ -28,6 +29,8 @@ class Collector:
                     continue
                 if watch and t['wallet']!=watch:
                     continue
+                previous=db.execute('SELECT first_seen FROM wallets WHERE address=?',(t['wallet'],)).fetchone()
+                known_at=previous['first_seen'] if previous else None
                 # Discovery is an activity sample, not a claim that this is the first buyer or launch.
                 db.execute('''INSERT INTO wallets(address,first_seen,last_seen,cursor) VALUES(?,?,?,?)
                     ON CONFLICT(address) DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen)''',
@@ -39,11 +42,9 @@ class Collector:
                     observed_at,venue,platform,quality) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (signature,t['wallet'],t['mint'],t['side'],t['quantity'],t['quote_mint'],t['quote_quantity'],chain_time,now,t['venue'],t['platform'],t['quality']))
                 if cur.rowcount and t['side']=='buy':
-                    # No retrospective selection of the discovery trade; evaluate subsequent fresh buys only.
-                    known=db.execute('SELECT first_seen FROM wallets WHERE address=?',(t['wallet'],)).fetchone()[0]
-                    eligible=int(not discovery and chain_time>=known and 0<=now-chain_time<=600)
-                    db.execute('INSERT OR IGNORE INTO signals(trade_id,wallet,mint,detected_at,eligible) VALUES(?,?,?,?,?)',
-                               (cur.lastrowid,t['wallet'],t['mint'],now,eligible))
+                    observation_class,eligible=classify(known_at,chain_time,now)
+                    db.execute('INSERT OR IGNORE INTO signals(trade_id,wallet,mint,detected_at,eligible,observation_class,rule_version) VALUES(?,?,?,?,?,?,2)',
+                               (cur.lastrowid,t['wallet'],t['mint'],now,int(eligible),observation_class))
             if watch:
                 for edge in links:
                     if watch in (edge['source'],edge['target']):
@@ -89,6 +90,8 @@ class Collector:
                     return
         now=time.time()
         interval={'active':300,'candidate':1800,'cooldown':21600,'dormant':86400}.get(wallet['status'],1800)
+        if wallet['status']=='candidate' and any(s['promising'] for s in cohort_stats(self.store,wallet['address'],now)):
+            interval=900
         self.store.execute('UPDATE wallets SET cursor=COALESCE(?,cursor),last_scan=?,next_scan=? WHERE address=?',
                            (newest,now,now+interval,wallet['address']))
 

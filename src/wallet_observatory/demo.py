@@ -27,7 +27,7 @@ def seed(store):
             mint=key(j+30); at=now-86400*2-j*800
             tid=store.execute('INSERT INTO trades(signature,wallet,mint,side,quantity,quote_mint,quote_quantity,chain_time,observed_at,venue,quality) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                        (f'demo-{i}-{j}',wallet,mint,'buy',50000,None,2,at-30,at,'pumpfun' if j%2==0 else 'launchlab','synthetic'))
-            sid=store.execute('INSERT INTO signals(trade_id,wallet,mint,detected_at,eligible) VALUES(?,?,?,?,1)',(tid,wallet,mint,at))
+            sid=store.execute("INSERT INTO signals(trade_id,wallet,mint,detected_at,eligible,observation_class,rule_version) VALUES(?,?,?,?,1,'fresh',2)",(tid,wallet,mint,at))
             ret=([28,16,8,-12,-24,-40][i]+j*3)
             store.execute('INSERT INTO outcomes VALUES(?,?,?,?,?,?,?,?,?)',(sid,900,86400,at+900,at+87300,.002,.002*(1+ret/100),ret,'estimated'))
     paper_open(store,key(30),500,'Synthetic example position')

@@ -1,6 +1,6 @@
 """Prospective fixed-horizon selection metrics, separate from manual paper trades."""
 import math
-from statistics import median
+from .rules import cohort_stats,display_cohort
 import time
 
 DELAYS=(300,900,3600)
@@ -48,27 +48,25 @@ def evaluate(store,now=None):
                      entry['price'] if entry else None,end['price'] if end else None,ret,status))
 
     for w in store.rows('SELECT * FROM wallets'):
-        # One equally weighted first signal per token; repeated buys cannot inflate score.
-        rows=store.rows('''SELECT o.return_pct,s.mint,o.status FROM signals s JOIN outcomes o ON o.signal_id=s.id
-          WHERE s.wallet=? AND s.detected_at>? AND o.delay=900 AND o.horizon=86400
-          AND s.id=(SELECT MIN(s2.id) FROM signals s2 WHERE s2.wallet=s.wallet AND s2.mint=s.mint AND s2.eligible=1)''', (w['address'],now-30*86400))
-        values=[r['return_pct'] for r in rows if r['status']=='estimated']
-        coverage=len(values)/len(rows) if rows else 0
-        score=median(values) if values else None
+        stats=cohort_stats(store,w['address'],now)
+        chosen=display_cohort(stats)
+        score=chosen['median_return']
+        values_count=chosen['priced_samples']
         previous=w['status']
-        if len(values)>=8 and coverage>=.8 and score>0 and sum(v>0 for v in values)/len(values)>=.6:
-            status='active'; reason='At least 8 tokens; positive median; ≥60% positive estimates; ≥80% coverage'
-        elif len(values)>=8 and coverage>=.8:
-            status='cooldown'; reason='Mature observed sample currently below promotion thresholds'
-        elif w['last_seen']<now-7*86400:
+        # Inactivity takes precedence; old wins must not consume fast polling forever.
+        if w['last_seen']<now-7*86400:
             status='dormant'; reason='No recent observed activity; periodic reassessment remains enabled'
+        elif any(s['qualifies'] for s in stats):
+            status='active'; reason=f"Qualifies in {chosen['cohort']} detections: ≥8 tokens, positive median, ≥60% wins, ≥80% coverage"
+        elif any(s['priced_samples']>=8 and (s['coverage'] or 0)>=80 for s in stats if s['cohort']!='legacy'):
+            status='cooldown'; reason='Mature observed samples currently below promotion thresholds'
         else:
             status='candidate'; reason='Insufficient prospective evidence; not a negative verdict'
         store.execute('UPDATE wallets SET status=?,reason=? WHERE address=?',(status,reason,w['address']))
         if status!=previous:
-            store.execute('INSERT INTO assessments(wallet,at,status,reason,samples,median_return) VALUES(?,?,?,?,?,?)',(w['address'],now,status,reason,len(values),score))
+            store.execute('INSERT INTO assessments(wallet,at,status,reason,samples,median_return) VALUES(?,?,?,?,?,?)',(w['address'],now,status,reason,values_count,score))
             store.event('assessment',f'{w["address"]}: {previous} → {status}')
-            if status=='active':
+            if status=='active' or (status=='candidate' and previous in ('cooldown','dormant')):
                 store.execute('UPDATE wallets SET next_scan=MIN(next_scan,?) WHERE address=?',(now,w['address']))
 
 def paper_open(store,mint,usd,notes='',signal_id=None,now=None):

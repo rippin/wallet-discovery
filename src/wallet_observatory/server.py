@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, parse_qs
 
 from .chain import address
 from .analytics import paper_open,paper_close
+from .rules import cohort_stats,display_cohort
 
 STATIC=Path(__file__).with_name('static')
 
@@ -17,12 +18,8 @@ def summary(store,config):
     wallets=store.rows('''SELECT w.*,COUNT(DISTINCT t.mint) tokens FROM wallets w LEFT JOIN trades t ON t.wallet=w.address
         GROUP BY w.address ORDER BY CASE w.status WHEN 'active' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,w.last_seen DESC LIMIT 200''')
     for w in wallets:
-        stats=store.one('''SELECT COUNT(*) samples,AVG(o.return_pct) mean_return,
-          SUM(CASE WHEN o.return_pct>0 THEN 1 ELSE 0 END)*100.0/NULLIF(COUNT(o.return_pct),0) win_rate,
-          COUNT(o.return_pct)*100.0/NULLIF(COUNT(*),0) coverage
-          FROM outcomes o JOIN signals s ON s.id=o.signal_id WHERE s.wallet=? AND o.delay=900 AND o.horizon=86400
-          AND s.detected_at>? AND s.id=(SELECT MIN(id) FROM signals WHERE wallet=s.wallet AND mint=s.mint AND eligible=1)''',(w['address'],time.time()-30*86400))
-        w.update(stats)
+        w['cohorts']=cohort_stats(store,w['address'],time.time())
+        w.update(display_cohort(w['cohorts']))
         speed=store.one('''SELECT COUNT(*) buys,
           SUM(EXISTS(SELECT 1 FROM trades sell WHERE sell.wallet=b.wallet AND sell.mint=b.mint
             AND sell.side='sell' AND sell.chain_time>b.chain_time AND sell.chain_time<=b.chain_time+900)) quick_exits
@@ -31,7 +28,7 @@ def summary(store,config):
         w['quick_exit_observations']=speed['quick_exits'] or 0
         w['mature_buy_observations']=speed['buys']
 
-    signals=store.rows('''SELECT s.*,t.side,t.chain_time,t.venue,k.symbol,w.status wallet_status FROM signals s
+    signals=store.rows('''SELECT s.*,t.side,t.chain_time,(s.detected_at-t.chain_time) detection_age_seconds,t.venue,k.symbol,w.status wallet_status FROM signals s
       JOIN trades t ON t.id=s.trade_id JOIN tokens k ON k.mint=s.mint JOIN wallets w ON w.address=s.wallet
       ORDER BY s.id DESC LIMIT 100''')
     tokens=store.rows('''SELECT t.*,s.price,s.liquidity,s.volume,s.observed_at,s.status market_status FROM tokens t
@@ -44,7 +41,7 @@ def summary(store,config):
             'budgets':store.rows('SELECT bucket,SUM(credits) credits FROM budgets WHERE day LIKE ? GROUP BY bucket',(time.strftime('%Y-%m',time.gmtime())+'%',)),
             'collector':store.meta('collector'),'mode':store.meta('mode') or 'live',
             'live_enabled':config.live,'credit_limit':config.monthly_credits,
-            'as_of':time.time(),'model':'Indicative estimates: $500, 15-minute delay → 24-hour hold; 1% cost plus liquidity impact per side. Not executable quotes.'}
+            'as_of':time.time(),'model':'Each row names its detection-age cohort; cohorts are never pooled. Indicative estimates: $500, 15-minute delay from detection → 24-hour hold; 1% cost plus liquidity impact per side. Not executable quotes.'}
 
 def make_server(store,config):
     class Handler(BaseHTTPRequestHandler):
@@ -90,6 +87,7 @@ def make_server(store,config):
                 wallet=parse_qs(parts.query).get('address',[''])[0]
                 if not address(wallet): return self.send(400,{'error':'Invalid Solana address'})
                 return self.send(200,{'wallet':store.one('SELECT * FROM wallets WHERE address=?',(wallet,)),
+                  'cohorts':cohort_stats(store,wallet,time.time()),
                   'trades':store.rows('SELECT * FROM trades WHERE wallet=? ORDER BY chain_time DESC LIMIT 200',(wallet,)),
                   'links':store.rows('SELECT * FROM links WHERE source=? OR target=? ORDER BY observed_at DESC LIMIT 100',(wallet,wallet)),
                   'assessments':store.rows('SELECT * FROM assessments WHERE wallet=? ORDER BY at DESC LIMIT 100',(wallet,)),

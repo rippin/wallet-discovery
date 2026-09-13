@@ -48,7 +48,14 @@ class Store:
         with self.connect() as db:
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript(SCHEMA)
-            db.execute("INSERT OR IGNORE INTO meta VALUES('schema_version','1')")
+            db.execute('BEGIN IMMEDIATE')
+            # Additive migration: keep old eligibility and outcome records unchanged.
+            columns={row['name'] for row in db.execute('PRAGMA table_info(signals)')}
+            if 'observation_class' not in columns:
+                db.execute("ALTER TABLE signals ADD COLUMN observation_class TEXT NOT NULL DEFAULT 'legacy'")
+            if 'rule_version' not in columns:
+                db.execute('ALTER TABLE signals ADD COLUMN rule_version INTEGER NOT NULL DEFAULT 1')
+            db.execute("INSERT OR REPLACE INTO meta VALUES('schema_version','2')")
 
     @contextmanager
     def connect(self):
