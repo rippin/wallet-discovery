@@ -3,7 +3,7 @@ services:
     build: .
     init: true
     restart: unless-stopped
-    env_file: .env.observatory
+    env_file: .env
     environment:
       OBS_HOST: 0.0.0.0
       OBS_DB: /data/observatory.sqlite3

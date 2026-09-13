@@ -6,7 +6,7 @@ class Config:
     db: str = 'data/observatory.sqlite3'
     host: str = '127.0.0.1'
     port: int = 8080
-    password: str = ''
+    password: str = 'password123'
     rpc_url: str = ''
     live: bool = False
     monthly_credits: int = 900_000
@@ -23,7 +23,7 @@ class Config:
         key = os.getenv('HELIUS_API_KEY', '')
         return cls(db=os.getenv('OBS_DB', cls.db), host=os.getenv('OBS_HOST', cls.host),
                    port=int(os.getenv('OBS_PORT', '8080')),
-                   password=os.getenv('OBS_PASSWORD', ''),
+                   password=os.getenv('OBS_PASSWORD') or cls.password,
                    rpc_url=os.getenv('OBS_RPC_URL', '') or (f'https://mainnet.helius-rpc.com/?api-key={key}' if key else ''),
                    live=os.getenv('OBS_LIVE', '0') == '1',
                    monthly_credits=int(os.getenv('OBS_MONTHLY_CREDITS', '900000')),

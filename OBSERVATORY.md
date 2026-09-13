@@ -15,7 +15,7 @@ Open <http://127.0.0.1:8765>. Synthetic data is visibly labeled and stored in `d
 ## Live collection on your Docker VPS
 
 1. Create a free Helius account, generate an API key, and leave paid upgrades/autoscaling disabled. No trading wallet or funded account is required.
-2. Copy `.env.observatory.example` to `.env.observatory`. Set `HELIUS_API_KEY` and a unique `OBS_PASSWORD` of at least 7 characters locally on the VPS. Set `OBS_LIVE=1`. Keep this file permissioned `600` and out of Git.
+2. Copy `.env.example` to `.env`. Set `HELIUS_API_KEY` and a unique `OBS_PASSWORD` of at least 7 characters locally on the VPS. Set `OBS_LIVE=1`. Keep this file permissioned `600` and out of Git.
 3. Run `docker compose up -d --build`. Docker stores observations in the persistent `observatory-data` volume. One application instance owns both the worker and dashboard. Do not start several collectors against the same database.
 4. The container publishes **only** `127.0.0.1:8080`. For initial checks, use `ssh -L 8080:127.0.0.1:8080 user@VPS_IP` and open <http://127.0.0.1:8080> locally. Login username: `research`; password: your `OBS_PASSWORD`.
 5. Configure HTTPS below for access directly by IP from other devices. Do not change the published binding to `0.0.0.0` to work around TLS setup.
@@ -114,6 +114,8 @@ bash deploy/update.sh
 
 Run `bash deploy/update.sh` again whenever you want the latest committed version. The script fetches and fast-forwards the branch, reloads its updated script, builds the image, validates configuration without printing secrets, backs up a running instance's database into `backups/`, starts Docker, and verifies the authenticated dashboard responds. It does not delete volumes or automatically roll back a failed deployment.
 
-If `.env.observatory` is missing and `.env` exists, setup copies `.env` to `.env.observatory` with restrictive permissions and preserves the original. Future runs use `.env.observatory`; when both exist, `.env.observatory` takes precedence. If neither exists, first interactive use prompts privately for an HTTPS RPC URL or Helius key and a 7+ character dashboard password (letters/numbers/dash/underscore; Enter to generate one), creates the file with restrictive permissions, and enables live collection. Existing configuration is preserved; an existing file with `OBS_LIVE=0` requires you to change that setting explicitly. Later runs can be noninteractive. When the configured password is missing or empty, the update script generates a random 32-character password and saves it as `OBS_PASSWORD` in `.env.observatory`. Existing nonempty passwords are preserved and must have at least 7 characters. The username is `research`.
+Setup reads only `.env` in the repository root. Existing `.env.observatory` files are ignored. If `.env` is absent, interactive setup creates it. A missing or blank `OBS_PASSWORD` defaults to `password123`; existing passwords must contain at least 7 characters. Login username: `research`. Later runs can be noninteractive.
 
 Requires Bash, Git, Docker with the Compose v2 plugin (supporting `up --wait`), and permission to use Docker. It stops for local code changes, unexpected remotes/branches, divergent history, failed builds, or failed backups. It never runs `git reset --hard`, stashes your changes, installs Docker, or alters HTTPS/firewall configuration. Keep off-VPS copies of the generated backups; local backups share the server's failure risk. If the previous container is stopped, no automatic backup is taken: use the documented backup/restore procedure before updates requiring data migration.
+
+To reset the dashboard account, run `bash deploy/update.sh --reset-password`. This sets `research` to `password123` in `.env` and redeploys.

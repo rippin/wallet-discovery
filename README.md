@@ -20,7 +20,7 @@ cd wallet-discovery
 bash deploy/update.sh
 ```
 
-Run `bash deploy/update.sh` again for future updates. The script preserves configuration, backs up a running database, and checks dashboard readiness. On first interactive use it prompts for a Helius key and dashboard password; other RPC providers can be configured through `OBS_RPC_URL` in `.env.observatory` beforehand.
+Run `bash deploy/update.sh` again for future updates. The script preserves configuration, backs up a running database, and checks dashboard readiness. On first interactive use it prompts for a Helius key and dashboard password; other RPC providers can be configured through `OBS_RPC_URL` in `.env` beforehand.
 
 See [OBSERVATORY.md](OBSERVATORY.md) for free-tier configuration, IP-based HTTPS, collection limits, wallet reassessment, and backups.
 

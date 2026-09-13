@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 main() {
+  local reset_password="${2:-${1:-}}"
   local script_dir repo_root expected_branch remote branch previous current running backup_name
   script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   repo_root="$(cd -- "$script_dir/.." && pwd)"
@@ -26,7 +27,7 @@ main() {
   [[ -z "$(git status --porcelain)" ]] || { echo 'Local code changes or untracked files found. Commit or move them before updating.' >&2; return 1; }
 
   if [[ "${1:-}" != '--after-pull' ]]; then
-    [[ $# == 0 ]] || { echo 'Usage: bash deploy/update.sh' >&2; return 1; }
+    [[ $# == 0 || ( $# == 1 && "$1" == --reset-password ) ]] || { echo 'Usage: bash deploy/update.sh [--reset-password]' >&2; return 1; }
     previous="$(git rev-parse HEAD)"
     echo 'Fetching repository updates…'
     git fetch origin "$expected_branch"
@@ -36,22 +37,16 @@ main() {
     current="$(git rev-parse HEAD)"
     printf 'Revision: %s → %s\n' "$previous" "$current"
     # Execute the updated script from its beginning, not a partially replaced file.
-    exec bash "$repo_root/deploy/update.sh" --after-pull
+    exec bash "$repo_root/deploy/update.sh" --after-pull "$reset_password"
   fi
 
-  # Support the conventional filename without sourcing credentials as shell code.
-  # The application-specific file takes precedence when both exist.
-  if [[ ! -f .env.observatory && -f .env ]]; then
-    (umask 077; cp .env .env.observatory)
-    echo 'Imported existing .env into .env.observatory. Future updates use .env.observatory; the original .env was preserved.'
-  fi
-  if [[ ! -f .env.observatory ]]; then
+  if [[ ! -f .env ]]; then
     if [[ ! -t 0 ]]; then
-      echo 'Missing .env.observatory. Run interactively once to enter an RPC URL or Helius API key and password.' >&2
+      echo 'Missing .env. Run interactively once to enter an RPC URL or Helius API key and password.' >&2
       return 1
     fi
     local credential api_key="" rpc_url="" password monthly=900000 cost=10
-    echo 'First-time setup. Credentials are saved only in the ignored .env.observatory file.'
+    echo 'First-time setup. Credentials are saved only in the ignored .env file.'
     read -r -s -p 'HTTPS RPC URL (Chainstack, Alchemy, etc.) or Helius API key: ' credential; printf '\n'
     if [[ "$credential" == https://* ]]; then
       # Restrict dotenv metacharacters so credentials are saved literally.
@@ -64,40 +59,32 @@ main() {
       [[ "$credential" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Expected an HTTPS RPC URL or Helius API key.' >&2; return 1; }
       api_key="$credential"
     fi
-    printf 'Initial local budget: %s units/month, %s units/request. Adjust these in .env.observatory for your plan.\n' "$monthly" "$cost"
-    read -r -s -p 'Dashboard password (7+ characters; Enter to generate one): ' password; printf '\n'
-    [[ -z "$password" || ( ${#password} -ge 7 && "$password" =~ ^[a-zA-Z0-9_-]+$ ) ]] || { echo 'Password must be 7+ characters using letters, numbers, dash, or underscore.' >&2; return 1; }
+    printf 'Initial local budget: %s units/month, %s units/request. Adjust these in .env for your plan.\n' "$monthly" "$cost"
+    read -r -s -p 'Dashboard password (7+ characters; Enter for password123): ' password; printf '\n'
+    password="${password:-password123}"
+    [[ ( ${#password} -ge 7 && "$password" =~ ^[a-zA-Z0-9_-]+$ ) ]] || { echo 'Password must be 7+ characters using letters, numbers, dash, or underscore.' >&2; return 1; }
     (umask 077
-      printf 'OBS_PASSWORD=%s\nHELIUS_API_KEY=%s\nOBS_RPC_URL=%s\nOBS_LIVE=1\nOBS_MONTHLY_CREDITS=%s\nOBS_RPC_CREDIT_COST=%s\nOBS_CYCLE_SECONDS=300\n' "$password" "$api_key" "$rpc_url" "$monthly" "$cost" > .env.observatory
+      printf 'OBS_PASSWORD=%s\nHELIUS_API_KEY=%s\nOBS_RPC_URL=%s\nOBS_LIVE=1\nOBS_MONTHLY_CREDITS=%s\nOBS_RPC_CREDIT_COST=%s\nOBS_CYCLE_SECONDS=300\n' "$password" "$api_key" "$rpc_url" "$monthly" "$cost" > .env
     )
     unset password api_key rpc_url credential
   fi
-  chmod 600 .env.observatory
+  if [[ "$reset_password" == --reset-password ]]; then
+    # Compose uses the last assignment. Preserve the rest of the configuration.
+    printf '\nOBS_PASSWORD=password123\n' >> .env
+    echo 'Dashboard password reset to password123 for research.'
+  fi
+  chmod 600 .env
   # Do not source this file as shell code or print its resolved values.
   docker compose config --quiet
   echo 'Building the updated image (the existing service stays running)…'
   docker compose build --pull observatory
-  # Generate only when Compose resolves a missing or blank password. Persist it
-  # before starting the service so restarts and health checks use the same value.
-  local generated_password
-  generated_password="$(docker compose run --rm --no-deps -T --entrypoint python observatory -c '
-import os, secrets
-if not os.getenv("OBS_PASSWORD"):
-    print(secrets.token_hex(16))
-')"
-  if [[ -n "$generated_password" ]]; then
-    [[ "$generated_password" =~ ^[a-f0-9]{32}$ ]] || { echo 'Unexpected password generation output; stopping.' >&2; return 1; }
-    printf '\nOBS_PASSWORD=%s\n' "$generated_password" >> .env.observatory
-    unset generated_password
-    echo 'Generated a random dashboard password and saved it in .env.observatory (OBS_PASSWORD). Username: research.'
-  fi
   echo 'Validating configuration…'
   docker compose run --rm --no-deps -T --entrypoint python observatory -c '
 import os, sys
-password=os.getenv("OBS_PASSWORD", "")
+password=os.getenv("OBS_PASSWORD") or "password123"
 live=os.getenv("OBS_LIVE", "0")
 if len(password)<7: sys.exit("OBS_PASSWORD must contain at least 7 characters")
-if live!="1": sys.exit("Set OBS_LIVE=1 in .env.observatory to enable live collection")
+if live!="1": sys.exit("Set OBS_LIVE=1 in .env to enable live collection")
 if not (os.getenv("HELIUS_API_KEY") or os.getenv("OBS_RPC_URL")): sys.exit("Set HELIUS_API_KEY or OBS_RPC_URL")
 for key in ("OBS_MONTHLY_CREDITS", "OBS_RPC_CREDIT_COST", "OBS_CYCLE_SECONDS"):
     if int(os.getenv(key, "1"))<=0: sys.exit(key+" must be positive")
@@ -127,7 +114,7 @@ a.backup(b); b.close(); a.close()
   # Verify authenticated HTTP, not merely that Docker started a process.
   docker compose exec -T observatory python -c '
 import base64, os, time, urllib.request, sys
-credential=base64.b64encode(("research:"+os.environ["OBS_PASSWORD"]).encode()).decode()
+credential=base64.b64encode(("research:"+(os.getenv("OBS_PASSWORD") or "password123")).encode()).decode()
 for attempt in range(15):
     try:
         request=urllib.request.Request("http://127.0.0.1:8080/api/summary",headers={"Authorization":"Basic "+credential})

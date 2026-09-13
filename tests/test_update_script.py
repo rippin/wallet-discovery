@@ -7,11 +7,11 @@ import tempfile
 import unittest
 
 class UpdateScriptTests(unittest.TestCase):
-    def run_script(self, failure='', conventional=False):
+    def run_script(self, failure='', conventional=False, reset=False):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'deploy').mkdir();(root/'bin').mkdir()
             shutil.copyfile(Path(__file__).parents[1]/'deploy/update.sh',root/'deploy/update.sh')
-            (root/('.env' if conventional else '.env.observatory')).write_text('OBS_LIVE=1\nOBS_RPC_URL=https://rpc.example.com/test\n')
+            (root/'.env').write_text('OBS_LIVE=1\nOBS_RPC_URL=https://rpc.example.com/test\n')
             fake='''#!/usr/bin/env python3
 import os,sys,pathlib
 args=sys.argv[1:]; name=pathlib.Path(sys.argv[0]).name
@@ -35,11 +35,13 @@ else:
                 p=root/'bin'/command;p.write_text(fake);p.chmod(0o755)
             env={**os.environ,'PATH':str(root/'bin')+os.pathsep+os.environ['PATH'],
                  'TEST_LOG':str(root/'calls'),'TEST_ROOT':str(root),'TEST_FAIL':failure}
-            result=subprocess.run(['bash',str(root/'deploy/update.sh')],env=env,capture_output=True,text=True)
+            result=subprocess.run(['bash',str(root/'deploy/update.sh')]+(['--reset-password'] if reset else []),env=env,capture_output=True,text=True)
             calls=(root/'calls').read_text()
+            if reset:
+                self.assertTrue((root/'.env').read_text().endswith('OBS_PASSWORD=password123\n'))
             if conventional:
-                self.assertEqual((root/'.env.observatory').read_text(),(root/'.env').read_text())
-                self.assertEqual((root/'.env.observatory').stat().st_mode & 0o777,0o600)
+                self.assertFalse((root/'.env.observatory').exists())
+                self.assertEqual((root/'.env').stat().st_mode & 0o777,0o600)
             return result,calls
     def test_success_pulls_backs_up_and_starts(self):
         r,c=self.run_script();self.assertEqual(r.returncode,0,r.stderr)
@@ -49,8 +51,13 @@ else:
     def test_conventional_env_reused_without_prompt(self):
         r,c=self.run_script(conventional=True)
         self.assertEqual(r.returncode,0,r.stderr)
-        self.assertIn('Imported existing .env',r.stdout)
+        self.assertNotIn('Imported existing .env',r.stdout)
         self.assertNotIn('First-time setup',r.stdout)
+
+    def test_reset_password_survives_pull(self):
+        r,c=self.run_script(reset=True)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('Dashboard password reset',r.stdout)
 
     def test_local_changes_stop_before_fetch(self):
         r,c=self.run_script('dirty');self.assertNotEqual(r.returncode,0);self.assertNotIn('git fetch',c)
@@ -64,12 +71,12 @@ else:
 class SetupPromptTests(unittest.TestCase):
     def setup_env(self, credential, password="example-password-1234567890"):
         script=(Path(__file__).parents[1]/'deploy/update.sh').read_text()
-        block=script[script.index('    local credential'):script.index('  chmod 600 .env.observatory')]
+        block=script[script.index('    local credential'):script.index('  if [[ "$reset_password" == --reset-password ]]')]
         block=block.rsplit('  fi',1)[0]
         with tempfile.TemporaryDirectory() as folder:
             result=subprocess.run(['bash','-c','setup() {\n'+block+'\n}\nsetup'],
                 cwd=folder,input=credential+'\n'+password+'\n',capture_output=True,text=True)
-            path=Path(folder)/'.env.observatory'
+            path=Path(folder)/'.env'
             return result,path.read_text() if path.exists() else ''
     def test_chainstack_url_sets_budget_and_no_helius_key(self):
         url='https://solana-mainnet.core.chainstack.com/example'
@@ -103,18 +110,15 @@ class SetupPromptTests(unittest.TestCase):
         r,data=self.setup_env('example-key','six666')
         self.assertNotEqual(r.returncode,0)
         self.assertEqual(data,'')
-    def test_blank_password_allowed_for_generation(self):
+    def test_blank_password_uses_default(self):
         r,data=self.setup_env('example-key','')
         self.assertEqual(r.returncode,0,r.stderr)
-        self.assertIn('OBS_PASSWORD=\n',data)
+        self.assertIn('OBS_PASSWORD=password123\n',data)
 
-class PasswordGenerationTests(unittest.TestCase):
-    def test_generate_only_for_missing_or_blank(self):
-        script=(Path(__file__).parents[1]/'deploy/update.sh').read_text()
-        code=script.split('import os, secrets\n',1)[1].split("\n')",1)[0]
-        for value in (None,'','existing7'):
-            env={k:v for k,v in os.environ.items() if k!='OBS_PASSWORD'}
-            if value is not None: env['OBS_PASSWORD']=value
-            result=subprocess.run([__import__('sys').executable,'-c','import os, secrets\n'+code],env=env,capture_output=True,text=True,check=True)
-            if value: self.assertEqual(result.stdout,'')
-            else: self.assertRegex(result.stdout.strip(),r'^[a-f0-9]{32}$')
+class PasswordDefaultTests(unittest.TestCase):
+    def test_missing_blank_and_existing(self):
+        from unittest.mock import patch
+        from wallet_observatory.config import Config
+        for env,expected in (({},'password123'),({'OBS_PASSWORD':''},'password123'),({'OBS_PASSWORD':'custom77'},'custom77')):
+            with patch.dict(os.environ,env,clear=True):
+                self.assertEqual(Config.env().password,expected)

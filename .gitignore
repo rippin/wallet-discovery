@@ -11,6 +11,6 @@ reports/
 # Observatory runtime data and deployment secrets
 data/
 .env.*
-!.env.observatory.example
+!.env.example
 *.sqlite3*
 backups/
