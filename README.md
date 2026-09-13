@@ -1,3 +1,7 @@
+# Wallet research workspace
+
+The new continuous scanner and dashboard are documented in [OBSERVATORY.md](OBSERVATORY.md). Start a synthetic preview with `PYTHONPATH=src python3 -m wallet_observatory --demo`.
+
 # Solana Memecoin Research
 
 A read-only CLI that produces timestamped **Consider / Watch / Avoid** research
