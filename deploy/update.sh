@@ -65,8 +65,8 @@ main() {
       api_key="$credential"
     fi
     printf 'Initial local budget: %s units/month, %s units/request. Adjust these in .env.observatory for your plan.\n' "$monthly" "$cost"
-    read -r -s -p 'Dashboard password (20+ characters; letters, numbers, dash, underscore): ' password; printf '\n'
-    [[ ${#password} -ge 20 && "$password" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Password must be 20+ characters using the requested character set.' >&2; return 1; }
+    read -r -s -p 'Dashboard password (7+ characters; Enter to generate one): ' password; printf '\n'
+    [[ -z "$password" || ( ${#password} -ge 7 && "$password" =~ ^[a-zA-Z0-9_-]+$ ) ]] || { echo 'Password must be 7+ characters using letters, numbers, dash, or underscore.' >&2; return 1; }
     (umask 077
       printf 'OBS_PASSWORD=%s\nHELIUS_API_KEY=%s\nOBS_RPC_URL=%s\nOBS_LIVE=1\nOBS_MONTHLY_CREDITS=%s\nOBS_RPC_CREDIT_COST=%s\nOBS_CYCLE_SECONDS=300\n' "$password" "$api_key" "$rpc_url" "$monthly" "$cost" > .env.observatory
     )
@@ -77,12 +77,26 @@ main() {
   docker compose config --quiet
   echo 'Building the updated image (the existing service stays running)…'
   docker compose build --pull observatory
+  # Generate only when Compose resolves a missing or blank password. Persist it
+  # before starting the service so restarts and health checks use the same value.
+  local generated_password
+  generated_password="$(docker compose run --rm --no-deps -T --entrypoint python observatory -c '
+import os, secrets
+if not os.getenv("OBS_PASSWORD"):
+    print(secrets.token_hex(16))
+')"
+  if [[ -n "$generated_password" ]]; then
+    [[ "$generated_password" =~ ^[a-f0-9]{32}$ ]] || { echo 'Unexpected password generation output; stopping.' >&2; return 1; }
+    printf '\nOBS_PASSWORD=%s\n' "$generated_password" >> .env.observatory
+    unset generated_password
+    echo 'Generated a random dashboard password and saved it in .env.observatory (OBS_PASSWORD). Username: research.'
+  fi
   echo 'Validating configuration…'
   docker compose run --rm --no-deps -T --entrypoint python observatory -c '
 import os, sys
 password=os.getenv("OBS_PASSWORD", "")
 live=os.getenv("OBS_LIVE", "0")
-if len(password)<20: sys.exit("OBS_PASSWORD must contain at least 20 characters")
+if len(password)<7: sys.exit("OBS_PASSWORD must contain at least 7 characters")
 if live!="1": sys.exit("Set OBS_LIVE=1 in .env.observatory to enable live collection")
 if not (os.getenv("HELIUS_API_KEY") or os.getenv("OBS_RPC_URL")): sys.exit("Set HELIUS_API_KEY or OBS_RPC_URL")
 for key in ("OBS_MONTHLY_CREDITS", "OBS_RPC_CREDIT_COST", "OBS_CYCLE_SECONDS"):

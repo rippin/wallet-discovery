@@ -62,13 +62,13 @@ else:
         r,c=self.run_script('backup');self.assertNotEqual(r.returncode,0);self.assertNotIn('docker compose up',c)
 
 class SetupPromptTests(unittest.TestCase):
-    def setup_env(self, credential):
+    def setup_env(self, credential, password="example-password-1234567890"):
         script=(Path(__file__).parents[1]/'deploy/update.sh').read_text()
         block=script[script.index('    local credential'):script.index('  chmod 600 .env.observatory')]
         block=block.rsplit('  fi',1)[0]
         with tempfile.TemporaryDirectory() as folder:
             result=subprocess.run(['bash','-c','setup() {\n'+block+'\n}\nsetup'],
-                cwd=folder,input=credential+'\n'+'example-password-1234567890\n',capture_output=True,text=True)
+                cwd=folder,input=credential+'\n'+password+'\n',capture_output=True,text=True)
             path=Path(folder)/'.env.observatory'
             return result,path.read_text() if path.exists() else ''
     def test_chainstack_url_sets_budget_and_no_helius_key(self):
@@ -94,3 +94,27 @@ class SetupPromptTests(unittest.TestCase):
         r,data=self.setup_env('https://rpc.example.com/$SECRET')
         self.assertNotEqual(r.returncode,0)
         self.assertEqual(data,'')
+
+    def test_seven_character_password_accepted(self):
+        r,data=self.setup_env('example-key','seven77')
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('OBS_PASSWORD=seven77',data)
+    def test_six_character_password_rejected(self):
+        r,data=self.setup_env('example-key','six666')
+        self.assertNotEqual(r.returncode,0)
+        self.assertEqual(data,'')
+    def test_blank_password_allowed_for_generation(self):
+        r,data=self.setup_env('example-key','')
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('OBS_PASSWORD=\n',data)
+
+class PasswordGenerationTests(unittest.TestCase):
+    def test_generate_only_for_missing_or_blank(self):
+        script=(Path(__file__).parents[1]/'deploy/update.sh').read_text()
+        code=script.split('import os, secrets\n',1)[1].split("\n')",1)[0]
+        for value in (None,'','existing7'):
+            env={k:v for k,v in os.environ.items() if k!='OBS_PASSWORD'}
+            if value is not None: env['OBS_PASSWORD']=value
+            result=subprocess.run([__import__('sys').executable,'-c','import os, secrets\n'+code],env=env,capture_output=True,text=True,check=True)
+            if value: self.assertEqual(result.stdout,'')
+            else: self.assertRegex(result.stdout.strip(),r'^[a-f0-9]{32}$')

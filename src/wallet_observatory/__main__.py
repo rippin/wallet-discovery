@@ -21,8 +21,8 @@ def main():
         cfg=replace(cfg,live=False,db=args.db or 'data/demo.sqlite3')
     if cfg.monthly_credits<=0 or cfg.rpc_credit_cost<=0:
         parser.error('Credit settings must be positive')
-    if cfg.host not in ('127.0.0.1','localhost','::1') and len(cfg.password)<20:
-        parser.error('Non-loopback serving requires OBS_PASSWORD of at least 20 characters and a TLS proxy')
+    if cfg.host not in ('127.0.0.1','localhost','::1') and len(cfg.password)<7:
+        parser.error('Non-loopback serving requires OBS_PASSWORD of at least 7 characters and a TLS proxy')
     if cfg.live and not cfg.rpc_url:
         parser.error('Live collection requires HELIUS_API_KEY or OBS_RPC_URL')
     store=Store(cfg.db)
