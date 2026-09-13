@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solana-memecoin-research"
+version = "0.1.0"
+description = "Point-in-time Solana memecoin risk research and wallet-forensics reports"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Solana Memecoin Research contributors"}]
+dependencies = []
+
+[project.scripts]
+memecoin-research = "solana_memecoin_research.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

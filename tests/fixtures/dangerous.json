@@ -1,0 +1,44 @@
+{
+  "market": {
+    "available": true,
+    "pair_address": "PAIR",
+    "dex_id": "raydium",
+    "base_token": {"address": "MINT", "symbol": "BAD"},
+    "price_usd": 0.0001,
+    "liquidity_usd": 5000,
+    "market_cap": 1000000,
+    "fdv": 1000000,
+    "pair_created_at_ms": 1704067200000,
+    "volume": {"h24": 2000},
+    "price_change": {"h24": 300}
+  },
+  "technical": {
+    "available": true,
+    "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "program": "SPL Token",
+    "decimals": 6,
+    "supply_raw": 1000000000000,
+    "supply_ui": 1000000,
+    "mint_authority": "DEV",
+    "freeze_authority": "DEV",
+    "is_initialized": true,
+    "extensions": []
+  },
+  "holders": [
+    {"token_account": "A1", "owner": "DEV", "amount_raw": 700000000000, "amount_ui": 700000, "share_pct": 70}
+  ],
+  "early_activity": {
+    "creator_candidate": "DEV",
+    "early_buyers": [],
+    "history_complete": true
+  },
+  "quote": {
+    "available": true,
+    "input_amount_raw": 5000000000,
+    "output_amount_raw": 100,
+    "minimum_output_raw": 99,
+    "price_impact_pct": 15,
+    "route_count": 1
+  }
+}
+
