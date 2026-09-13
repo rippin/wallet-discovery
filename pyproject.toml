@@ -17,3 +17,6 @@ memecoin-research = "solana_memecoin_research.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+wallet_observatory = ["instructions.json", "static/*.html", "static/*.css", "static/*.js"]

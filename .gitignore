@@ -8,3 +8,10 @@ build/
 .env
 reports/
 
+# Observatory runtime data and deployment secrets
+data/
+.env.*
+!.env.example
+!.env.observatory.example
+*.sqlite3*
+backups/

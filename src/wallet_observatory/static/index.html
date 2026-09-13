@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wallet Observatory</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<aside><a class="brand" href="/">◉ <span>WALLET<br>OBSERVATORY</span></a><div class="aside-label">RESEARCH WORKSPACE</div><nav><button data-page="overview" class="selected">◫ &nbsp; Overview</button><button data-page="wallets">◎ &nbsp; Wallet research</button><button data-page="activity">↗ &nbsp; Activity feed</button><button data-page="tokens">◇ &nbsp; Token universe</button><button data-page="paper">▤ &nbsp; Paper portfolio</button><button data-page="system">⚙ &nbsp; Collection health</button></nav><div class="aside-bottom"><span class="dot"></span> SOLANA MAINNET<br><small>Pump.fun + LaunchLab<br>Observe. Research. Evaluate.</small></div></aside>
+<main><header><span id="breadcrumb">Workspace / Overview</span><div><span id="mode" class="pill">Loading</span><button id="refresh" class="quiet">↻ Refresh</button></div></header>
+<div id="notice" role="status"></div>
+<section class="heading"><div><div class="eyebrow">AN EDGE NEEDS EVIDENCE</div><h1 id="title">Follow the evidence.</h1><p id="subtitle">Discover repeat early buyers. Measure what happens after you have time to act.</p></div><button id="add-wallet" class="primary">+ Watch a wallet</button></section>
+<section id="content" aria-live="polite"><p>Loading observations…</p></section>
+<footer><span id="updated">Waiting for data</span><a href="/api/export" target="_blank" rel="noopener">Export dashboard JSON ↗</a></footer>
+</main>
+<dialog id="modal"><button id="close-modal" class="modal-close" aria-label="Close">×</button><div id="modal-content"></div></dialog>
+</body></html>
