@@ -118,7 +118,7 @@ def make_server(store,config):
             if path=='/api/export':
                 return self.send(200,{'exported_at':time.time(),'summary':summary(store,config),
                   'note':'Dashboard export is capped. Use SQLite backup for complete history.'})
-            files={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+            files={'/':'index.html','/app.js':'app.js','/pagination.js':'pagination.js','/style.css':'style.css'}
             if path not in files: return self.send(404,{'error':'Not found'})
             types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'}
             file=STATIC/files[path]
