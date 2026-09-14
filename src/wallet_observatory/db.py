@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS discovery_queue(program TEXT NOT NULL,signature TEXT 
  chain_time REAL,sequence INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(program,signature));
 CREATE INDEX IF NOT EXISTS discovery_pending ON discovery_queue(status,window_id,sequence);
+CREATE INDEX IF NOT EXISTS discovery_fresh ON discovery_queue(status,program,chain_time DESC,window_id DESC,sequence);
 CREATE TABLE IF NOT EXISTS discovery_buyers(window_id INTEGER NOT NULL,wallet TEXT NOT NULL,PRIMARY KEY(window_id,wallet));
 CREATE TABLE IF NOT EXISTS admission_pending(signature TEXT NOT NULL,wallet TEXT NOT NULL,mint TEXT NOT NULL,
  observed_at REAL NOT NULL,PRIMARY KEY(signature,wallet,mint));

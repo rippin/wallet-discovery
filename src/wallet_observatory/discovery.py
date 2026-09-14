@@ -1,4 +1,4 @@
-"""Bounded, durable signature windows. RPC lists backwards; windows advance forwards."""
+"""Forward cursor coverage with bounded, freshest-first transaction inspection."""
 import time
 from .chain import PUMP,LAB,parse
 from .providers import ProviderError
@@ -25,22 +25,18 @@ class Discovery:
         # Initial bootstrap intentionally starts with one recent page; no historic completeness claim.
         done=reached or len(page)<self.cfg.discovery_page_size or window['previous_cursor'] is None
         pages=window['pages']+1
-        capped=not done and pages>=self.cfg.discovery_max_pages
+        aged=bool(rows and rows[-1].get('blockTime') is not None and rows[-1]['blockTime']<time.time()-self.cfg.discovery_max_age)
+        capped=not done and (pages>=self.cfg.discovery_max_pages or aged)
         # A short page before the old cursor is also a coverage gap (history/provider truncation).
         gap=bool(window['previous_cursor'] and not reached and (capped or len(page)<self.cfg.discovery_page_size))
         with self.s.connect() as db:
-            pending=db.execute("SELECT COUNT(*) FROM discovery_queue WHERE status='pending'").fetchone()[0]
-            capacity=max(0,self.cfg.discovery_queue_cap-pending)
             failed=skipped=0
             for index,item in enumerate(rows):
                 if item.get('err'):
                     failed+=1;continue
-                if db.execute('SELECT 1 FROM discovery_queue WHERE program=? AND signature=?',(program,item['signature'])).fetchone():continue
-                if capacity<=0:
-                    skipped+=1;continue
-                db.execute('INSERT INTO discovery_queue(program,signature,window_id,chain_time,sequence) VALUES(?,?,?,?,?)',
+                db.execute('INSERT OR IGNORE INTO discovery_queue(program,signature,window_id,chain_time,sequence) VALUES(?,?,?,?,?)',
                            (program,item['signature'],window['id'],item.get('blockTime'),window['available']+index))
-                capacity-=1
+            self.prune_pending(db)
             db.execute('''UPDATE discovery_windows SET head=COALESCE(head,?),before_signature=?,pages=?,
                        available=available+?,failed=failed+?,skipped=skipped+?,gap=MAX(gap,?),state=?,completed_at=? WHERE id=?''',
                        (page[0]['signature'] if page else window['previous_cursor'],page[-1]['signature'] if page else None,
@@ -49,10 +45,27 @@ class Discovery:
         if gap:self.s.event('coverage',PROGRAM_NAMES[program]+': signature window ended before its previous cursor; older gap size unknown')
         return window['id']
 
+    def prune_pending(self,db):
+        # Keep recent work when input exceeds our RPC budget. Retain queue rows as
+        # an audit trail and account for each skipped transaction exactly once.
+        cutoff=time.time()-self.cfg.discovery_max_age
+        stale=db.execute("SELECT program,signature,window_id FROM discovery_queue WHERE status='pending' AND (chain_time IS NULL OR chain_time<?)",(cutoff,)).fetchall()
+        for row in stale:
+            db.execute("UPDATE discovery_queue SET status='skipped' WHERE program=? AND signature=?",(row['program'],row['signature']))
+            db.execute('UPDATE discovery_windows SET skipped=skipped+1 WHERE id=?',(row['window_id'],))
+        overflow=db.execute("""SELECT program,signature,window_id FROM discovery_queue WHERE status='pending'
+            ORDER BY chain_time DESC,window_id DESC,sequence ASC LIMIT -1 OFFSET ?""",(self.cfg.discovery_queue_cap,)).fetchall()
+        for row in overflow:
+            db.execute("UPDATE discovery_queue SET status='skipped' WHERE program=? AND signature=?",(row['program'],row['signature']))
+            db.execute('UPDATE discovery_windows SET skipped=skipped+1 WHERE id=?',(row['window_id'],))
+
     def inspect_one(self,program):
-        item=self.s.one('''SELECT q.* FROM discovery_queue q JOIN discovery_windows w ON w.id=q.window_id
-          WHERE q.program=? AND q.status='pending' AND w.state='ready'
-          ORDER BY q.window_id,q.sequence DESC LIMIT 1''',(program,))
+        # Inspect pages immediately; finishing backward enumeration must not delay
+        # fresh observations. Cursor enumeration still advances independently.
+        item=self.s.one('''SELECT q.* FROM discovery_queue q
+          WHERE q.program=? AND q.status='pending' AND q.chain_time>=?
+          ORDER BY q.chain_time DESC,q.window_id DESC,q.sequence ASC LIMIT 1''',
+          (program,time.time()-self.cfg.discovery_max_age))
         if not item:return False
         tx=self.c.load_tx(item['signature'],'discovery')
         if not tx or tx.get('blockTime') is None:
@@ -78,6 +91,7 @@ class Discovery:
         turn=self.s.meta('discovery_turn') or 0
         programs=(PUMP,LAB) if turn%2==0 else (LAB,PUMP)
         self.s.meta('discovery_turn',turn+1)
+        with self.s.connect() as db:self.prune_pending(db)
         remaining=self.cfg.discovery_requests
         for program in programs:
             try:self.enumerate_page(program)

@@ -140,3 +140,7 @@ LaunchLab routed swaps may spend a transient quote token with zero net wallet de
 ## Early following results
 
 Wallet research shows preliminary 1h and 6h outcomes beside the 24h ranking, all with a 15-minute entry delay. Each horizon and detection-age cohort is calculated independently, using one eligible signal per token in the rolling 30-day window. Average hypothetical P&L is mean return × $500, not wallet realized P&L or a portfolio sum. Coverage includes all mature samples, including missing outcomes. Waiting samples and the next maturity time include the ten-minute observation tolerance; delayed evaluation is labeled separately from missing prices or insufficient liquidity. Short-horizon results never qualify or promote a wallet. Buy/sell counts are observed activity, not complete blockchain history.
+
+### Discovery freshness
+
+Signature cursors advance between bounded windows, but transaction inspection prioritizes the newest queued activity, including pages still being enumerated. Pending transactions older than `OBS_DISCOVERY_MAX_AGE_SECONDS` (default 600 seconds) expire as explicitly counted skips. At queue capacity, newer activity displaces older queued work. Enumeration stops at the age boundary and records a coverage gap if it has not reached the prior cursor. This is budget-limited sampling, not complete launchpad coverage. Existing wallet tracking and stored observations are retained. The request cap and USD/market-cap admission filters remain unchanged.

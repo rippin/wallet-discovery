@@ -17,6 +17,7 @@ class Config:
     discovery_page_size: int = 1000
     discovery_max_pages: int = 20
     discovery_queue_cap: int = 20000
+    discovery_max_age: int = 600
     min_market_cap: float = 10000
     min_purchase_usd: float = 100
     wallets_per_cycle: int = 8
@@ -37,5 +38,6 @@ class Config:
                    cycle_seconds=max(60, int(os.getenv('OBS_CYCLE_SECONDS', '300'))),
                    discovery_interval=max(10,int(os.getenv('OBS_DISCOVERY_SECONDS','30'))),
                    discovery_requests=max(3,min(100,int(os.getenv('OBS_DISCOVERY_REQUESTS','6')))),
+                   discovery_max_age=max(60,int(os.getenv('OBS_DISCOVERY_MAX_AGE_SECONDS','600'))),
                    min_market_cap=max(0,float(os.getenv('OBS_MIN_MARKET_CAP_USD','10000'))),
                    min_purchase_usd=max(0,float(os.getenv('OBS_MIN_PURCHASE_USD','100'))))

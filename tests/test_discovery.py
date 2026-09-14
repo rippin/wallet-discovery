@@ -31,16 +31,38 @@ class DiscoveryTests(unittest.TestCase):
     def seed(self):
         self.f.pages[(PUMP,None)]=[sig('old')];self.d.enumerate_page(PUMP)
         self.s.execute("UPDATE discovery_queue SET status='inspected'")
-    def test_cursor_window_spans_restart_and_processes_oldest_first(self):
-        self.seed();self.f.pages[(PUMP,None)]=[sig('new3'),sig('new2')]
+    def test_cursor_window_spans_restart_and_inspects_before_completion(self):
+        self.seed();stamp=time.time()
+        self.f.pages[(PUMP,None)]=[{**sig('new3'),'blockTime':stamp+2},{**sig('new2'),'blockTime':stamp+1}]
         self.f.pages[(PUMP,'new2')]=[sig('new1'),sig('old')]
-        self.d.enumerate_page(PUMP);self.assertFalse(self.d.inspect_one(PUMP))
+        self.d.enumerate_page(PUMP)
+        self.f.transactions['new3']=transaction()
+        self.assertTrue(self.d.inspect_one(PUMP))
         Discovery(Collector(self.s,self.cfg,self.f)).enumerate_page(PUMP)
         for name in ('new1','new2','new3'):self.f.transactions[name]=transaction()
         for _ in range(3):self.d.inspect_one(PUMP)
-        self.assertEqual([r[1] for r in self.f.requests if r[0]=='tx'],['new1','new2','new3'])
+        self.assertEqual([r[1] for r in self.f.requests if r[0]=='tx'],['new3','new2','new1'])
         self.d.enumerate_page(PUMP)
         self.assertEqual(self.s.one('SELECT COUNT(*) n FROM discovery_queue')['n'],4)
+    def test_stale_queue_expires_once_and_frees_capacity(self):
+        self.cfg.discovery_queue_cap=1
+        self.f.pages[(PUMP,None)]=[{**sig('stale'),'blockTime':time.time()-3600}]
+        self.d.enumerate_page(PUMP)
+        self.assertEqual(coverage(self.s)[0]['skipped'],1)
+        self.f.pages[(PUMP,None)]=[sig('fresh')]
+        self.d.enumerate_page(PUMP)
+        with self.s.connect() as db:self.d.prune_pending(db)
+        self.assertEqual(coverage(self.s)[0]['skipped'],1)
+        self.assertEqual(self.s.one("SELECT signature FROM discovery_queue WHERE status='pending'")['signature'],'fresh')
+    def test_full_queue_keeps_newer_activity(self):
+        self.cfg.discovery_queue_cap=1
+        self.f.pages[(PUMP,None)]=[{**sig('older'),'blockTime':time.time()-30}]
+        self.d.enumerate_page(PUMP)
+        self.f.pages[(PUMP,None)]=[sig('fresh'),sig('older')]
+        self.d.enumerate_page(PUMP)
+        self.assertEqual(self.s.one("SELECT signature FROM discovery_queue WHERE status='pending'")['signature'],'fresh')
+        self.assertEqual(coverage(self.s)[0]['skipped'],1)
+
     def test_network_failure_keeps_item_pending(self):
         self.f.pages[(PUMP,None)]=[sig('a')];self.d.enumerate_page(PUMP);self.f.fail=True
         with self.assertRaises(ProviderError):self.d.inspect_one(PUMP)
