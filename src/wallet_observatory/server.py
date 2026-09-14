@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, parse_qs
 
 from .chain import address
 from .analytics import paper_open,paper_close
-from .rules import cohort_stats,display_cohort
+from .rules import cohort_stats,display_cohort,following_evidence
 from .discovery import coverage
 
 STATIC=Path(__file__).with_name('static')
@@ -21,6 +21,7 @@ def summary(store,config):
     for w in wallets:
         w['cohorts']=cohort_stats(store,w['address'],time.time())
         w.update(display_cohort(w['cohorts']))
+        w.update(following_evidence(store,w['address'],time.time(),w['cohorts']))
         speed=store.one('''SELECT COUNT(*) buys,
           SUM(EXISTS(SELECT 1 FROM trades sell WHERE sell.wallet=b.wallet AND sell.mint=b.mint
             AND sell.side='sell' AND sell.chain_time>b.chain_time AND sell.chain_time<=b.chain_time+900)) quick_exits
@@ -47,7 +48,7 @@ def summary(store,config):
             'purchase_filter':store.one('SELECT SUM(estimated_usd IS NULL) unknown,SUM(estimated_usd<?) below FROM admission_values',(config.min_purchase_usd,)),
             'min_market_cap_usd':config.min_market_cap,'discovery_interval':config.discovery_interval,
             'rpc_route':store.meta('rpc_route'),'rpc_fallback_usage':store.meta('rpc_fallback_usage'),
-            'as_of':time.time(),'model':'Each row names its detection-age cohort; cohorts are never pooled. Indicative estimates: $500, 15-minute delay from detection → 24-hour hold; 1% cost plus liquidity impact per side. Not executable quotes.'}
+            'as_of':time.time(),'model':'Each result names its detection-age cohort; cohorts are never pooled. Hypothetical $500 entries 15 minutes after detection, held 1h/6h/24h; 24h determines qualification. Costs include 1% plus liquidity impact per side. Not actual wallet P&L or executable quotes.'}
 
 def make_server(store,config):
     class Handler(BaseHTTPRequestHandler):
@@ -94,6 +95,7 @@ def make_server(store,config):
                 if not address(wallet): return self.send(400,{'error':'Invalid Solana address'})
                 return self.send(200,{'wallet':store.one('SELECT * FROM wallets WHERE address=?',(wallet,)),
                   'cohorts':cohort_stats(store,wallet,time.time()),
+                  **following_evidence(store,wallet,time.time()),
                   'trades':store.rows('SELECT * FROM trades WHERE wallet=? ORDER BY chain_time DESC LIMIT 200',(wallet,)),
                   'links':store.rows('SELECT * FROM links WHERE source=? OR target=? ORDER BY observed_at DESC LIMIT 100',(wallet,wallet)),
                   'assessments':store.rows('SELECT * FROM assessments WHERE wallet=? ORDER BY at DESC LIMIT 100',(wallet,)),

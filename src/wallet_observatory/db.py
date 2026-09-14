@@ -73,6 +73,7 @@ class Store:
                 db.execute("ALTER TABLE signals ADD COLUMN observation_class TEXT NOT NULL DEFAULT 'legacy'")
             if 'rule_version' not in columns:
                 db.execute('ALTER TABLE signals ADD COLUMN rule_version INTEGER NOT NULL DEFAULT 1')
+            db.execute('CREATE INDEX IF NOT EXISTS signals_wallet_detected ON signals(wallet,detected_at)')
             snap_columns={r['name'] for r in db.execute('PRAGMA table_info(snapshots)')}
             if 'market_cap_usd' not in snap_columns:
                 db.execute('ALTER TABLE snapshots ADD COLUMN market_cap_usd REAL')
