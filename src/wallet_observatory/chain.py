@@ -51,6 +51,15 @@ def launch_quote_flow(mapping,instructions):
         if info.get('destination')==account and info.get('source')==mapping.get('quote_vault'): total+=qty
     return total
 
+def pump_quote_flow(mapping,instructions):
+    # Pump V2 can use a transient quote account, just like routed LaunchLab.
+    # Require checked transfers scoped to this instruction and its named vault.
+    if not mapping.get('quote_mint'):return None
+    return launch_quote_flow({'user_quote_token':mapping.get('associated_quote_user'),
+      'quote_token_mint':mapping.get('quote_mint'),'quote_token_program':mapping.get('quote_token_program'),
+      'payer':mapping.get('user'),'quote_vault':mapping.get('associated_quote_bonding_curve')},instructions)
+
+
 def parse(tx, known_mints=()):
     if not tx or not tx.get('meta') or tx['meta'].get('err') is not None:
         return [], [], 'failed_or_missing'
@@ -103,7 +112,7 @@ def parse(tx, known_mints=()):
                            'quote':mapping.get('quote_token_mint') or mapping.get('quote_mint') or (WSOL if venue=='pumpfun' else None),
                            'user':mapping.get('user') or mapping.get('payer'),
                            'side':('buy' if spec['name'].startswith('buy') else 'sell') if spec else None,
-                           'quote_flow':launch_quote_flow(mapping,scopes.get(id(ix),[])) if venue=='launchlab' else None})
+                           'quote_flow':launch_quote_flow(mapping,scopes.get(id(ix),[])) if venue=='launchlab' else pump_quote_flow(mapping,scopes.get(id(ix),[])) if venue=='pumpfun' else None})
     links = []
     # Direct outer system transfers only: no pool flows or inferred ownership merges.
     for ix in message.get('instructions', []):
@@ -140,7 +149,7 @@ def parse(tx, known_mints=()):
             assets=[(observation['base'],changes[observation['base']])]
             quote=[(observation['quote'],changes[observation['quote']])]
             # Routed intermediary quote tokens may have zero net wallet movement.
-            # Only use checked transfers inside this exact LaunchLab instruction,
+            # Only use checked transfers inside this exact launchpad instruction,
             # with explicit user accounts and a matching net base-token direction.
             if not quote[0][1] and len(explicit)==1 and observation.get('quote_flow'):
                 quote=[(observation['quote'],observation['quote_flow'])]

@@ -63,6 +63,15 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(self.s.one("SELECT signature FROM discovery_queue WHERE status='pending'")['signature'],'fresh')
         self.assertEqual(coverage(self.s)[0]['skipped'],1)
 
+    def test_default_window_returns_to_head_after_two_pages(self):
+        self.seed();self.f.pages[(PUMP,None)]=[sig('head'),sig('page1')]
+        self.f.pages[(PUMP,'page1')]=[sig('middle'),sig('page2')]
+        self.d.enumerate_page(PUMP);self.d.enumerate_page(PUMP)
+        latest=self.s.one('SELECT * FROM discovery_windows ORDER BY id DESC LIMIT 1')
+        self.assertEqual(latest['state'],'ready');self.assertEqual(latest['gap'],1)
+        self.d.enumerate_page(PUMP)
+        self.assertEqual(self.f.requests[-1],('page',PUMP,None))
+
     def test_network_failure_keeps_item_pending(self):
         self.f.pages[(PUMP,None)]=[sig('a')];self.d.enumerate_page(PUMP);self.f.fail=True
         with self.assertRaises(ProviderError):self.d.inspect_one(PUMP)
@@ -110,4 +119,27 @@ class RoutedLaunchLabTests(unittest.TestCase):
         tx=copy.deepcopy(row['tx'])
         for group in tx['meta']['innerInstructions']:
             for ix in group['instructions']:ix.pop('stackHeight',None)
+        self.assertEqual(parse(tx)[2],'ambiguous_swap')
+
+class RoutedPumpTests(unittest.TestCase):
+    def fixtures(self):
+        return json.loads((Path(__file__).parent/'fixtures/observatory/pump_routed.json').read_text())
+    def test_real_routed_buy_and_sell(self):
+        for row in self.fixtures():
+            trades,_,status=parse(row['tx'])
+            self.assertEqual(status,'swap_observed')
+            self.assertEqual(trades[0]['venue'],'pumpfun')
+            self.assertEqual(trades[0]['side'],row['expected_side'])
+            self.assertIn('instruction-local',trades[0]['quality'])
+    def test_unscoped_and_wrong_authority_remain_excluded(self):
+        row=next(r for r in self.fixtures() if r['expected_side']=='buy')
+        tx=copy.deepcopy(row['tx'])
+        for group in tx['meta']['innerInstructions']:
+            for ix in group['instructions']:ix.pop('stackHeight',None)
+        self.assertEqual(parse(tx)[2],'ambiguous_swap')
+        tx=copy.deepcopy(row['tx'])
+        for group in tx['meta']['innerInstructions']:
+            for ix in group['instructions']:
+                info=(ix.get('parsed') or {}).get('info') or {}
+                if 'authority' in info:info['authority']=key(99)
         self.assertEqual(parse(tx)[2],'ambiguous_swap')

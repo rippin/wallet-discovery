@@ -15,7 +15,7 @@ class Config:
     discovery_interval: int = 30
     discovery_requests: int = 6
     discovery_page_size: int = 1000
-    discovery_max_pages: int = 20
+    discovery_max_pages: int = 2
     discovery_queue_cap: int = 20000
     discovery_max_age: int = 600
     min_market_cap: float = 10000

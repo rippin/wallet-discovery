@@ -41,9 +41,16 @@ def summary(store,config):
        LEFT JOIN snapshots s ON s.id=(SELECT id FROM snapshots WHERE mint=t.mint ORDER BY observed_at DESC LIMIT 1)
        ORDER BY t.last_seen DESC LIMIT 150''')
     positions=store.rows('SELECT * FROM paper ORDER BY id DESC LIMIT 200')
+    discovery_funnel=store.one('''SELECT
+      (SELECT COUNT(*) FROM wallets WHERE first_seen>?) added_24h,
+      (SELECT COUNT(DISTINCT wallet) FROM admission_values) evaluated_wallets,
+      (SELECT COUNT(*) FROM admission_values WHERE estimated_usd>=?) qualifying_purchases,
+      (SELECT COUNT(DISTINCT wallet) FROM admission_pending a WHERE NOT EXISTS(SELECT 1 FROM wallets w WHERE w.address=a.wallet)) pending_wallets''',
+      (time.time()-86400,config.min_purchase_usd))
+    discovery_funnel['inspection_ages']=store.rows('''SELECT program,MAX(chain_time) latest_chain_time FROM discovery_queue WHERE status='inspected' GROUP BY program''')
     experiment=experiment_summary(store)
     experiment['focus']=focus_health(store,experiment['run']['id'],time.time()) if experiment['run'] else []
-    return {'experiment':experiment,'opportunities':opportunities(store,config,experiment),
+    return {'discovery_funnel':discovery_funnel,'experiment':experiment,'opportunities':opportunities(store,config,experiment),
             'quote_enabled':bool(config.jupiter_api_key),'research_health':store.meta('research_health'),
             'trades':recent_trades(store),'counts':counts,'wallets':wallets,'signals':signals,'tokens':tokens,'paper':positions,
             'exits':store.rows('SELECT * FROM paper_exits ORDER BY id DESC LIMIT 100'),
