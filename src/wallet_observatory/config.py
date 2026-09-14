@@ -24,6 +24,12 @@ class Config:
     page_limit: int = 50
     max_pages: int = 2
     market_cap: int = 120
+    focus_wallets: int = 3
+    focus_seconds: int = 120
+    research_seconds: int = 60
+    jupiter_api_key: str = ''
+    quote_daily_cap: int = 100
+
 
     @classmethod
     def env(cls):
@@ -39,5 +45,10 @@ class Config:
                    discovery_interval=max(10,int(os.getenv('OBS_DISCOVERY_SECONDS','30'))),
                    discovery_requests=max(3,min(100,int(os.getenv('OBS_DISCOVERY_REQUESTS','6')))),
                    discovery_max_age=max(60,int(os.getenv('OBS_DISCOVERY_MAX_AGE_SECONDS','600'))),
+                   focus_wallets=max(0,min(10,int(os.getenv('OBS_FOCUS_WALLETS','3')))),
+                   focus_seconds=max(60,int(os.getenv('OBS_FOCUS_SECONDS','120'))),
+                   research_seconds=max(30,int(os.getenv('OBS_RESEARCH_SECONDS','60'))),
+                   jupiter_api_key=os.getenv('JUPITER_API_KEY',''),
+                   quote_daily_cap=max(0,min(1000,int(os.getenv('OBS_QUOTE_DAILY_CAP','100')))),
                    min_market_cap=max(0,float(os.getenv('OBS_MIN_MARKET_CAP_USD','10000'))),
                    min_purchase_usd=max(0,float(os.getenv('OBS_MIN_PURCHASE_USD','100'))))

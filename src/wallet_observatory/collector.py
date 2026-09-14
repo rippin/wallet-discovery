@@ -9,6 +9,10 @@ from .analytics import evaluate
 from .rules import classify,cohort_stats
 from .discovery import Discovery
 from .trade_values import value_trades
+from .research import enroll,evaluate_research
+from .focus import poll_focus
+from .quotes import check_routes
+from .positions import record_flows,backfill_flows
 
 class Collector:
     def __init__(self,store,config,providers=None):
@@ -16,6 +20,8 @@ class Collector:
         self.providers=providers or Providers(store,config)
         self.stop=threading.Event()
         self.next_discovery=None
+        self.next_research=None
+        self.research_busy=False
 
     def ingest(self,signature,tx,bucket,watch=None):
         if not tx or tx.get('blockTime') is None:
@@ -73,6 +79,7 @@ class Collector:
                     db.execute('INSERT OR IGNORE INTO signals(trade_id,wallet,mint,detected_at,eligible,observation_class,rule_version) VALUES(?,?,?,?,?,?,2)',
                                (cur.lastrowid,t['wallet'],t['mint'],now,int(eligible),observation_class))
             if watch:
+                record_flows(db,signature,tx,watch)
                 for edge in links:
                     if watch in (edge['source'],edge['target']):
                         db.execute('INSERT OR IGNORE INTO links(source,target,signature,observed_at,kind,amount) VALUES(?,?,?,?,?,?)',
@@ -80,7 +87,9 @@ class Collector:
         return True
 
     def load_tx(self,sig,bucket):
-        if bucket!='discovery': self.discovery_due()
+        if bucket!='discovery':
+            self.discovery_due()
+            self.research_due()
         cached=self.store.one('SELECT raw FROM transactions WHERE signature=?',(sig,))
         return json.loads(cached['raw']) if cached else self.providers.transaction(sig,bucket)
 
@@ -88,6 +97,38 @@ class Collector:
         if self.next_discovery is not None and time.monotonic()>=self.next_discovery:
             self.discover()
             self.next_discovery=time.monotonic()+self.config.discovery_interval
+
+    def research_due(self):
+        if self.research_busy or self.next_research is None or time.monotonic()<self.next_research:return
+        self.research_busy=True
+        self.next_research=time.monotonic()+self.config.research_seconds
+        try:
+            now=time.time();run=enroll(self.store,self.config,now)
+            backfill_flows(self.store)
+            poll_focus(self,run,now)
+            enroll(self.store,self.config,time.time())
+            # Same sampling priority for selected and control tokens; no favorable
+            # treatment of the shortlist in the paper-price measurements.
+            rows=self.store.rows('''SELECT t.mint,MAX(p.observed_at) sampled FROM tokens t
+              LEFT JOIN snapshots p ON p.mint=t.mint
+              WHERE EXISTS(SELECT 1 FROM research_samples s WHERE s.mint=t.mint AND s.detected_at>?)
+              GROUP BY t.mint ORDER BY COALESCE(sampled,0),t.mint LIMIT 30''',(time.time()-26*3600,))
+            try:
+                for point in self.providers.market([r['mint'] for r in rows]):self.save_market(point)
+            except ProviderError as e:self.store.event('provider',str(e))
+            evaluate_research(self.store)
+            selected=self.store.rows("SELECT DISTINCT mint FROM research_samples WHERE run_id=? AND arm='selected' AND detected_at>? ORDER BY detected_at DESC LIMIT 10",(run['id'],time.time()-3600))
+            check_routes(self.store,self.providers,self.config,[r['mint'] for r in selected])
+            self.store.meta('research_health',{'at':time.time(),'sampled_tokens':len(rows),'status':'running'})
+        finally:
+            self.research_busy=False
+            self.next_research=time.monotonic()+self.config.research_seconds
+
+    def save_market(self,s):
+        with self.store.connect() as db:
+            db.execute('INSERT INTO snapshots(mint,observed_at,price,liquidity,volume,pair,status,market_cap_usd) VALUES(?,?,?,?,?,?,?,?)',
+              (s['mint'],time.time(),s['price'],s['liquidity'],s['volume'],s['pair'],s['status'],s.get('market_cap_usd')))
+            if s['symbol']:db.execute('UPDATE tokens SET symbol=? WHERE mint=?',(s['symbol'],s['mint']))
 
     def discover(self):
         Discovery(self).tick()
@@ -138,11 +179,7 @@ class Collector:
           GROUP BY t.mint ORDER BY held DESC,COALESCE(last_sample,0) ASC LIMIT ?''',(time.time()-35*86400,self.config.market_cap))
         for offset in range(0,len(rows),30):
             for s in self.providers.market([r['mint'] for r in rows[offset:offset+30]]):
-                with self.store.connect() as db:
-                    db.execute('INSERT INTO snapshots(mint,observed_at,price,liquidity,volume,pair,status,market_cap_usd) VALUES(?,?,?,?,?,?,?,?)',
-                               (s['mint'],time.time(),s['price'],s['liquidity'],s['volume'],s['pair'],s['status'],s.get('market_cap_usd')))
-                    if s['symbol']:
-                        db.execute('UPDATE tokens SET symbol=? WHERE mint=?',(s['symbol'],s['mint']))
+                self.save_market(s)
 
         # Admit deferred buyers only once market cap is observed above the threshold.
         # Detection/first-seen time is now, never backdated to the original trade.
@@ -182,10 +219,12 @@ class Collector:
     def run(self):
         next_cycle=0
         self.next_discovery=0
+        self.next_research=0
         while not self.stop.is_set():
             now=time.monotonic()
             try:
                 self.discovery_due()
+                self.research_due()
                 if now>=next_cycle:
                     self.cycle(include_discovery=False)
                     next_cycle=time.monotonic()+self.config.cycle_seconds
@@ -194,4 +233,4 @@ class Collector:
                 self.store.meta('collector',{'status':'error','at':time.time()})
                 self.next_discovery=time.monotonic()+self.config.discovery_interval
                 next_cycle=time.monotonic()+self.config.cycle_seconds
-            self.stop.wait(max(1,min(next_cycle,self.next_discovery)-time.monotonic()))
+            self.stop.wait(max(1,min(next_cycle,self.next_discovery,self.next_research)-time.monotonic()))

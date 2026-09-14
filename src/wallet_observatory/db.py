@@ -5,6 +5,26 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = '''
+CREATE TABLE IF NOT EXISTS token_openings(wallet TEXT NOT NULL,mint TEXT NOT NULL,chain_time REAL NOT NULL,quantity REAL NOT NULL,PRIMARY KEY(wallet,mint));
+CREATE TABLE IF NOT EXISTS token_flows(signature TEXT NOT NULL,wallet TEXT NOT NULL,mint TEXT NOT NULL,chain_time REAL NOT NULL,delta REAL NOT NULL,PRIMARY KEY(signature,wallet,mint));
+CREATE INDEX IF NOT EXISTS token_flows_wallet_time ON token_flows(wallet,chain_time);
+CREATE TABLE IF NOT EXISTS quote_budget(day TEXT PRIMARY KEY,requests INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS focus_queue(wallet TEXT NOT NULL,signature TEXT NOT NULL,chain_time REAL,attempts INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(wallet,signature));
+CREATE TABLE IF NOT EXISTS focus_state(wallet TEXT PRIMARY KEY,cursor TEXT,next_scan REAL NOT NULL DEFAULT 0,last_poll REAL,gaps INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS research_runs(id INTEGER PRIMARY KEY,started_at REAL NOT NULL,ends_at REAL NOT NULL,rules TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS research_members(run_id INTEGER NOT NULL,wallet TEXT NOT NULL,reason TEXT NOT NULL,prior TEXT NOT NULL,PRIMARY KEY(run_id,wallet));
+CREATE TABLE IF NOT EXISTS research_samples(id INTEGER PRIMARY KEY,run_id INTEGER NOT NULL,signal_id INTEGER NOT NULL UNIQUE,
+ wallet TEXT NOT NULL,mint TEXT NOT NULL,arm TEXT NOT NULL,detected_at REAL NOT NULL,market_cap REAL,liquidity REAL,token_age REAL,
+ UNIQUE(run_id,wallet,mint));
+CREATE TABLE IF NOT EXISTS research_results(sample_id INTEGER NOT NULL,delay INTEGER NOT NULL,horizon INTEGER NOT NULL,
+ status TEXT NOT NULL,entry_at REAL,exit_at REAL,return_pct REAL,worst_return REAL,best_return REAL,
+ profitable_seconds REAL,path_samples INTEGER NOT NULL DEFAULT 0,max_gap REAL,entry_disadvantage REAL,sold_before_entry REAL,
+ PRIMARY KEY(sample_id,delay,horizon));
+CREATE TABLE IF NOT EXISTS route_checks(id INTEGER PRIMARY KEY,mint TEXT NOT NULL,at REAL NOT NULL,size_usdc REAL NOT NULL,
+ status TEXT NOT NULL,roundtrip_usdc REAL,buy_impact REAL,sell_impact REAL,router TEXT);
+CREATE INDEX IF NOT EXISTS route_checks_mint_time ON route_checks(mint,at);
+CREATE INDEX IF NOT EXISTS research_samples_time ON research_samples(detected_at);
+
 CREATE TABLE IF NOT EXISTS trade_values(trade_id INTEGER PRIMARY KEY,usd_amount REAL NOT NULL,price_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS quote_prices(mint TEXT PRIMARY KEY,price REAL,observed_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS admission_values(signature TEXT NOT NULL,wallet TEXT NOT NULL,mint TEXT NOT NULL,

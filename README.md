@@ -2,6 +2,18 @@
 
 A read-only Solana wallet-discovery and paper-trading dashboard. It samples Pump.fun and Raydium LaunchLab activity, follows candidate wallets, and measures subsequent token performance after research delays.
 
+## What changed: research and position evidence
+
+Read [Research dashboard changes](RESEARCH_CHANGES.md) for the complete walkthrough, accounting rules, configuration and limitations.
+
+- **Overview:** research opportunities with detection delay, observed position action, price movement, liquidity and exit flags.
+- **Wallet details:** FIFO position histories, priced acquisition coverage, partial exits and matched realized P&L estimates.
+- **Closer observation:** a bounded three-wallet shortlist, frozen for seven days, sharing the existing RPC budget.
+- **Forward comparison:** 1/5/15/60-minute delayed entries, 1/6/24-hour outcomes, matched sampled controls, loss statistics and results without the best winner.
+- **Optional route checks:** quote-only Jupiter V2 buy/sell checks with a separate API key and request cap. No signing or execution.
+
+Older observations remain intact. New forward tests start at deployment; missing cost basis and unavailable exits are shown explicitly.
+
 ## Preview
 
 ```sh
