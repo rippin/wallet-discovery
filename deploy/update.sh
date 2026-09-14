@@ -100,22 +100,30 @@ print("Configuration valid; credentials were not printed")
 import os, sqlite3, sys
 source=os.environ.get("OBS_DB", "/data/observatory.sqlite3")
 if not os.path.isfile(source): sys.exit("Existing database not found; refusing to create an empty backup")
-path="/tmp/"+sys.argv[1]
+path=os.path.join(os.path.dirname(source),".backup-"+sys.argv[1])
 a=sqlite3.connect(source); b=sqlite3.connect(path)
-a.backup(b); b.close(); a.close()
+try:
+    a.backup(b)
+except Exception:
+    b.close(); a.close(); os.unlink(path)
+    raise
+else:
+    b.close(); a.close()
 ' "$backup_name"
-    # Docker archive copying can fail for files on container tmpfs mounts.
-    # Read through the running container and expose only a complete backup.
+    # Stage on the data volume; the small /tmp mount cannot hold growing databases.
+    # Stream and expose only a complete backup, then remove the staging copy.
     (umask 077
       docker compose exec -T observatory python -c '
-import sqlite3, sys
-path="/tmp/"+sys.argv[1]
+import os, sqlite3, sys
+source=os.environ.get("OBS_DB", "/data/observatory.sqlite3")
+path=os.path.join(os.path.dirname(source),".backup-"+sys.argv[1])
 with sqlite3.connect("file:"+path+"?mode=ro",uri=True) as db:
     if db.execute("PRAGMA quick_check").fetchone()[0]!="ok":
         sys.exit("Backup integrity check failed")
 with open(path,"rb") as source:
     import shutil
     shutil.copyfileobj(source,sys.stdout.buffer)
+os.unlink(path)
 ' "$backup_name" > "backups/$backup_name.partial"
       [[ -s "backups/$backup_name.partial" ]]
       mv "backups/$backup_name.partial" "backups/$backup_name"
