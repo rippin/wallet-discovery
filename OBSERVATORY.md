@@ -144,3 +144,7 @@ Wallet research shows preliminary 1h and 6h outcomes beside the 24h ranking, all
 ### Discovery freshness
 
 Signature cursors advance between bounded windows, but transaction inspection prioritizes the newest queued activity, including pages still being enumerated. Pending transactions older than `OBS_DISCOVERY_MAX_AGE_SECONDS` (default 600 seconds) expire as explicitly counted skips. At queue capacity, newer activity displaces older queued work. Enumeration stops at the age boundary and records a coverage gap if it has not reached the prior cursor. This is budget-limited sampling, not complete launchpad coverage. Existing wallet tracking and stored observations are retained. The request cap and USD/market-cap admission filters remain unchanged.
+
+### Observed trade amounts
+
+Activity and wallet details show up to 200 recent buys and sells, token quantity, quote amount paid/received, venue and transaction links. USD amounts multiply the observed quote flow by the first fresh quote price available to the pricing cycle and freeze that estimate. Price timestamps within ten minutes of the chain transaction are labeled near trade time; other prices are labeled later conversions. These are not exact execution dollars or realized P&L. Missing/stale/invalid prices remain unavailable. Quote pricing uses the existing market-data provider, without additional transaction RPC lookups.

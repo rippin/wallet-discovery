@@ -8,6 +8,7 @@ from .providers import Providers, ProviderError, BudgetExceeded
 from .analytics import evaluate
 from .rules import classify,cohort_stats
 from .discovery import Discovery
+from .trade_values import value_trades
 
 class Collector:
     def __init__(self,store,config,providers=None):
@@ -121,12 +122,14 @@ class Collector:
 
     def markets(self):
         # Price quote currencies in a separate cache, not the tracked token universe.
-        quotes=self.store.rows('''SELECT a.quote_mint FROM admission_values a LEFT JOIN quote_prices q ON q.mint=a.quote_mint
-          WHERE a.estimated_usd IS NULL AND a.quote_mint IS NOT NULL
+        quotes=self.store.rows('''SELECT a.quote_mint FROM (SELECT quote_mint FROM admission_values WHERE estimated_usd IS NULL
+            UNION SELECT t.quote_mint FROM trades t LEFT JOIN trade_values v ON v.trade_id=t.id WHERE v.trade_id IS NULL) a
+          LEFT JOIN quote_prices q ON q.mint=a.quote_mint WHERE a.quote_mint IS NOT NULL
           GROUP BY a.quote_mint ORDER BY COALESCE(MAX(q.observed_at),0) LIMIT 30''')
         if quotes:
             for quote in self.providers.market([r['quote_mint'] for r in quotes]):
                 self.store.execute('INSERT OR REPLACE INTO quote_prices VALUES(?,?,?)',(quote['mint'],quote['price'],time.time()))
+        value_trades(self.store)
         # Open positions first, then tokens with pending 28-day outcomes; oldest sample first.
         rows=self.store.rows('''SELECT t.mint,MAX(s.observed_at) last_sample,
           EXISTS(SELECT 1 FROM paper p WHERE p.mint=t.mint AND p.remaining>0) held

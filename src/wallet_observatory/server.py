@@ -11,6 +11,7 @@ from .chain import address
 from .analytics import paper_open,paper_close
 from .rules import cohort_stats,display_cohort,following_evidence
 from .discovery import coverage
+from .trade_values import recent_trades
 
 STATIC=Path(__file__).with_name('static')
 
@@ -37,7 +38,7 @@ def summary(store,config):
        LEFT JOIN snapshots s ON s.id=(SELECT id FROM snapshots WHERE mint=t.mint ORDER BY observed_at DESC LIMIT 1)
        ORDER BY t.last_seen DESC LIMIT 150''')
     positions=store.rows('SELECT * FROM paper ORDER BY id DESC LIMIT 200')
-    return {'counts':counts,'wallets':wallets,'signals':signals,'tokens':tokens,'paper':positions,
+    return {'trades':recent_trades(store),'counts':counts,'wallets':wallets,'signals':signals,'tokens':tokens,'paper':positions,
             'exits':store.rows('SELECT * FROM paper_exits ORDER BY id DESC LIMIT 100'),
             'events':store.rows('SELECT * FROM events ORDER BY id DESC LIMIT 30'),
             'budgets':store.rows('SELECT bucket,SUM(credits) credits FROM budgets WHERE day LIKE ? GROUP BY bucket',(time.strftime('%Y-%m',time.gmtime())+'%',)),
@@ -96,7 +97,7 @@ def make_server(store,config):
                 return self.send(200,{'wallet':store.one('SELECT * FROM wallets WHERE address=?',(wallet,)),
                   'cohorts':cohort_stats(store,wallet,time.time()),
                   **following_evidence(store,wallet,time.time()),
-                  'trades':store.rows('SELECT * FROM trades WHERE wallet=? ORDER BY chain_time DESC LIMIT 200',(wallet,)),
+                  'trades':recent_trades(store,wallet),
                   'links':store.rows('SELECT * FROM links WHERE source=? OR target=? ORDER BY observed_at DESC LIMIT 100',(wallet,wallet)),
                   'assessments':store.rows('SELECT * FROM assessments WHERE wallet=? ORDER BY at DESC LIMIT 100',(wallet,)),
                   'outcomes':store.rows('SELECT o.*,s.mint FROM outcomes o JOIN signals s ON s.id=o.signal_id WHERE s.wallet=? ORDER BY s.id DESC LIMIT 300',(wallet,))})

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = '''
+CREATE TABLE IF NOT EXISTS trade_values(trade_id INTEGER PRIMARY KEY,usd_amount REAL NOT NULL,price_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS quote_prices(mint TEXT PRIMARY KEY,price REAL,observed_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS admission_values(signature TEXT NOT NULL,wallet TEXT NOT NULL,mint TEXT NOT NULL,
  quote_mint TEXT,quote_quantity REAL,estimated_usd REAL,valued_at REAL,
